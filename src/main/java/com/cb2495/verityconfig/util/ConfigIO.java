@@ -19,7 +19,7 @@ public final class ConfigIO {
     private ConfigIO() {}
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "VerityConfig-IO");
+        Thread thread = new Thread(runnable, "VerityPlus-IO");
         // 守护线程：不会阻止游戏退出
         thread.setDaemon(true);
         return thread;
@@ -35,7 +35,7 @@ public final class ConfigIO {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-        }, "VerityConfig-IO-shutdown"));
+        }, "VerityPlus-IO-shutdown"));
     }
 
     /** 在后台线程执行磁盘读写。 */

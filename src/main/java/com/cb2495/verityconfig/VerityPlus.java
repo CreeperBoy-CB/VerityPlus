@@ -23,12 +23,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @SuppressWarnings("removal")
-@Mod(VerityConfig.MODID)
-public class VerityConfig {
+@Mod(VerityPlus.MODID)
+public class VerityPlus {
     public static final String MODID = "verityconfig";
-    public static final String MODPACK_VERSION = "6.11"; // 整合包版本，可修改
+    public static final String MODPACK_VERSION = "6.99"; // 整合包版本，可修改
 
-    public VerityConfig() {
+    public VerityPlus() {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onClientSetup);
     }
 
@@ -105,7 +105,7 @@ public class VerityConfig {
 
         for (File file : files) {
             String name = file.getName();
-            if (name.startsWith("[Verity配置工具]")) {
+            if (name.startsWith("[Verity拓展增强]")) {
                 ModsListScreen.configModVersion = extractVersion(name);
             } else if (name.startsWith("[Verity]")) {
                 ModsListScreen.verityVersion = extractVersion(name);

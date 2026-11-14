@@ -99,7 +99,7 @@ public final class VeritySpec {
 
     /**
      * 读一个配置项的当前值；读不到时返回 null。
-     * <p>参数是 {@code VerityConfig} 里的字段名（如 {@code AI_PROVIDER}），
+     * <p>参数是 Verity 的 {@code VerityConfig} 里的字段名（如 {@code AI_PROVIDER}），
      * 不是 toml 里的键名。
      */
     public static Object get(String name) {

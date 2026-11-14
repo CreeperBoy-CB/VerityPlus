@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * 提供商注册表：端点、对话补全地址、API 格式、Key 获取地址与可选模型。
- * <p>这些信息原本分在两处维护：{@code VerityConfigScreen} 里有一份「提供商 →
+ * <p>这些信息原本分在两处维护：{@code VerityPlusScreen} 里有一份「提供商 →
  * 模型 / Key 地址」，{@code VerityConfigManager} 里另有一份「提供商 → 端点 /
  * API 格式」。两边各写一遍提供商清单，往一边加提供商而忘了另一边，会以
  * 「下拉框里没有它」或者「Base URL 被清空」这种静默方式出错。

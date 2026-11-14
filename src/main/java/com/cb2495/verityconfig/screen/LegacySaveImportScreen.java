@@ -99,7 +99,7 @@ public class LegacySaveImportScreen extends Screen {
             onFinished.run();
         } else {
             ModsListScreen.firstTimeSetup = true;
-            Minecraft.getInstance().setScreen(new VerityConfigScreen());
+            Minecraft.getInstance().setScreen(new VerityPlusScreen());
         }
     }
 

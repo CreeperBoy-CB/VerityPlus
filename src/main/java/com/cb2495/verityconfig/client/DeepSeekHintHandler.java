@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.config.ModConfig;
 import com.cb2495.verityconfig.config.VerityConfigManager;
 import net.minecraft.ChatFormatting;
@@ -24,7 +24,7 @@ import java.time.LocalDateTime;
  *   <li>峰谷时段发生切换时提示一次</li>
  * </ul>
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public class DeepSeekHintHandler {
 
     /** 上次提示时所处的状态（是否高峰），用于检测切换。 */

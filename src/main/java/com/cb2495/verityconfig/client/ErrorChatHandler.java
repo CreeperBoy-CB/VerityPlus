@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.config.VerityConfigManager;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public class ErrorChatHandler {
 
     // 待发送消息队列与 2 tick 延迟
@@ -32,20 +32,21 @@ public class ErrorChatHandler {
         if (message == null) return;
 
         String text = message.getString();
-        if (!text.contains("ERROR")) return;
+        // "ERROR: " 会被 ChatFilter 翻成「错误：」。正常情况下 ChatFilter 的优先级更高、
+        // 这里拿到的还是原文；但那份先后关系只靠注解维持，哪天改了优先级就会静默失效，
+        // 所以两种前缀都认。
+        if (!text.contains("ERROR") && !text.contains(TRANSLATED_ERROR)) return;
 
         // 提取 JSON
         String jsonPart = extractJson(text);
-        if (jsonPart == null) {
-            sendGenericMessage();
-            return;
-        }
+        // 没有 JSON 就不用管：这类报错是给玩家看的整句说明
+        // （「Ollama is not installed. ...」「Enter a custom AI model for ...」等），
+        // 里面没有 message 段落可解析，ChatFilter 已经把它们翻成中文了。
+        // 以前这里会兜一句通用提示，等于在正常的中文报错后面又叠一条无关的话。
+        if (jsonPart == null) return;
 
         JsonObject json = parseJson(jsonPart);
-        if (json == null) {
-            sendGenericMessage();
-            return;
-        }
+        if (json == null) return;
 
         // 通用错误：记忆文件错误（所有 AI 通用）
         // 这类报错的 code 一律是 invalid_request_error，无法区分具体原因，
@@ -66,8 +67,26 @@ public class ErrorChatHandler {
     }
 
     // ---------- JSON 提取与解析 ----------
+
+    /** Verity 原文的报错前缀。 */
+    private static final String RAW_ERROR = "ERROR";
+
+    /** 翻译后的报错前缀（ChatTranslator 把 {@code ERROR: } 换成它）。 */
+    private static final String TRANSLATED_ERROR = "错误：";
+
     private static String extractJson(String text) {
-        int errorIdx = text.indexOf("ERROR");
+        // JSON 在报错前缀之后。两种前缀谁在前面用谁，都没有就从整段里找
+        int raw = text.indexOf(RAW_ERROR);
+        int translated = text.indexOf(TRANSLATED_ERROR);
+        int errorIdx;
+        if (raw < 0) {
+            errorIdx = translated;
+        } else if (translated < 0) {
+            errorIdx = raw;
+        } else {
+            errorIdx = Math.min(raw, translated);
+        }
+
         int start = text.indexOf('{', errorIdx >= 0 ? errorIdx : 0);
         int end = text.lastIndexOf('}');
         if (start != -1 && end > start) {
@@ -188,7 +207,7 @@ public class ErrorChatHandler {
 
     private static void sendApiKeyHint() {
         pendingComponents.add(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("填写了错误的 API Key，请输入 ").withStyle(ChatFormatting.WHITE))
                         .append(ChatLinks.suggestCmd("/vc cs", ChatLinks.CLICK_TO_FILL))
                         .append(Component.literal(" 并重新走一遍 AI 配置流程").withStyle(ChatFormatting.WHITE))
@@ -198,13 +217,13 @@ public class ErrorChatHandler {
 
     private static void sendMemoryRestoreHint() {
         pendingComponents.add(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("记忆文件错误，可以尝试 ").withStyle(ChatFormatting.WHITE))
                         .append(ChatLinks.suggestCmd("/vc verity mfix", ChatLinks.CLICK_TO_FILL))
                         .append(Component.literal(" 修复聊天记忆。").withStyle(ChatFormatting.WHITE))
         );
         pendingComponents.add(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("如果仍不起作用，可使用 ").withStyle(ChatFormatting.WHITE))
                         .append(ChatLinks.suggestCmd("/vc verity mdel", ChatLinks.CLICK_TO_FILL))
                         .append(Component.literal(" 删除记忆文件让 Verity 重新生成。").withStyle(ChatFormatting.WHITE))
@@ -214,14 +233,14 @@ public class ErrorChatHandler {
 
     private static void sendMessage(String text) {
         pendingComponents.add(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal(text).withStyle(ChatFormatting.WHITE))
         );
         pendingTicks = 2;
     }
 
     private static void sendMessageWithLink(String prefix, String linkText, String url, String suffix) {
-        Component msg = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+        Component msg = Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                 .append(Component.literal(prefix).withStyle(ChatFormatting.WHITE))
                 .append(Component.literal(linkText)
                         .withStyle(style -> style

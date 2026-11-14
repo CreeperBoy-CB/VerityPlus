@@ -23,7 +23,7 @@ group = mod_group_id
 ext.mod_description = '\u5728\u6E38\u620F\u5185\u914D\u7F6E Verity JE \u6A21\u7EC4\u7684 AI \u53C2\u6570\u3002\n\u5305\u542B AI \u914D\u7F6E\u3001\u9AD8\u7EA7\u8BBE\u7F6E\u3001\u6A21\u7EC4\u7BA1\u7406\u4E0E\u8BB0\u5FC6\u6587\u4EF6\u4FEE\u590D\u529F\u80FD\u3002'
 
 base {
-    archivesName = "[Verity配置工具]verityconfig'${mod_version}'"
+    archivesName = "[Verity拓展增强]verityplus'${mod_version}'"
 }
 
 // Mojang ships Java 17 to end users in 1.18+, so your mod should target Java 17.

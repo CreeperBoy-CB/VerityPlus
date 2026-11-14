@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.screen;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.help.HelpReadTracker;
 import com.cb2495.verityconfig.util.Log;
 import com.cb2495.verityconfig.util.PlatformUtils;
@@ -27,8 +27,8 @@ import java.util.regex.Pattern;
 
 public class ModsListScreen extends Screen {
 
-    // 默认值直接取自 VerityConfig.MODPACK_VERSION，避免两处版本号不一致
-    public static String modpackVersion = VerityConfig.MODPACK_VERSION;
+    // 默认值直接取自 VerityPlus.MODPACK_VERSION，避免两处版本号不一致
+    public static String modpackVersion = VerityPlus.MODPACK_VERSION;
     public static String verityVersion = "未知";
     public static String configModVersion = "未知";
     public static boolean firstTimeSetup = false;
@@ -43,7 +43,7 @@ public class ModsListScreen extends Screen {
 
     private static final Set<String> HIDDEN_BRACKETS = new HashSet<>(Arrays.asList(
             "Verity",
-            "Verity配置工具",
+            "Verity拓展增强",
             "Geckolib",
             "Cloth Config API",
             "Yet Another Config Lib"
@@ -51,7 +51,7 @@ public class ModsListScreen extends Screen {
 
     private static final Set<String> AUTO_ENABLE_BRACKETS = new HashSet<>(Arrays.asList(
             "Verity",
-            "Verity配置工具",
+            "Verity拓展增强",
             "Cloth Config API",
             "Yet Another Config Lib",
             "Geckolib",
@@ -734,14 +734,14 @@ public class ModsListScreen extends Screen {
 
     @Override
     protected void init() {
-        VerityConfig.loadVersions();
+        VerityPlus.loadVersions();
 
         // 每次进入界面都重新统计改动：resize 也会走到这里，但那不是玩家的改动。
         // 必须放在下面的自动启用之前，否则首次启动的自动启用不会被计入改动。
         modFilesChanged = false;
 
         // 只在「首次启动配置流程」里自动启用模组
-        // （WelcomeScreen -> VerityConfigScreen 的「完成」 -> 这里）。
+        // （WelcomeScreen -> VerityPlusScreen 的「完成」 -> 这里）。
         // 从 /vc modls、配置页的「配置模组」按钮等入口进来时不应改动用户的模组开关。
         if (firstTimeSetup) {
             // 先统一中文禁用后缀，否则下面 enableAutoMods 扫不到这些文件
@@ -763,7 +763,7 @@ public class ModsListScreen extends Screen {
         this.doneButton = Button.builder(Component.literal("完成"), btn -> {
             if (returnToConfigScreen) {
                 returnToConfigScreen = false;
-                Minecraft.getInstance().setScreen(new VerityConfigScreen());
+                Minecraft.getInstance().setScreen(new VerityPlusScreen());
             } else {
                 checkUnreadGuidesThenRestart();
             }
@@ -888,7 +888,7 @@ public class ModsListScreen extends Screen {
         LocalPlayer player = Minecraft.getInstance().player;
         if (player == null) return;
         player.displayClientMessage(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal(message).withStyle(ChatFormatting.RED)),
                 false);
     }
@@ -1311,7 +1311,7 @@ public class ModsListScreen extends Screen {
         graphics.pose().scale(0.5f, 0.5f, 1.0f);
         graphics.drawString(this.font, "Verity Modpack v" + modpackVersion, 0, 0, 0xFFAAAAAA, false);
         graphics.drawString(this.font, "Verity JE v" + verityVersion, 0, 10, 0xFFAAAAAA, false);
-        graphics.drawString(this.font, "Verity Config v" + configModVersion, 0, 20, 0xFFAAAAAA, false);
+        graphics.drawString(this.font, "Verity Plus v" + configModVersion, 0, 20, 0xFFAAAAAA, false);
         graphics.pose().popPose();
 
         // 筛选行：布局由 updateFilterBoxes 统一算好，点击检测读的是同一份坐标
@@ -1651,7 +1651,7 @@ public class ModsListScreen extends Screen {
     public void onClose() {
         if (returnToConfigScreen) {
             returnToConfigScreen = false;
-            Minecraft.getInstance().setScreen(new VerityConfigScreen());
+            Minecraft.getInstance().setScreen(new VerityPlusScreen());
         } else {
             Minecraft.getInstance().setScreen(null);
         }

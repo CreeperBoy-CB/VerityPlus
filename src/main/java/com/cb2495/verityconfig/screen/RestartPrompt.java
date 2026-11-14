@@ -7,7 +7,7 @@ import net.minecraft.network.chat.Component;
 
 /**
  * 「是否需要重启游戏」确认框。
- * <p>这段代码原先在 {@code VerityConfigScreen}、{@code ModsListScreen} 和
+ * <p>这段代码原先在 {@code VerityPlusScreen}、{@code ModsListScreen} 和
  * {@code ModGuideReminderScreen} 里各写了一份，内容完全一致。
  * <p>默认文案用于「配置已保存」，启动时的配置自检修复则用
  * {@link #show(String, String)} 传入自己的说明。

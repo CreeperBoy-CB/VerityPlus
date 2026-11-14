@@ -1,7 +1,7 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
-import com.cb2495.verityconfig.screen.VerityConfigScreen;
+import com.cb2495.verityconfig.VerityPlus;
+import com.cb2495.verityconfig.screen.VerityPlusScreen;
 import com.cb2495.verityconfig.util.Log;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
@@ -13,7 +13,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.lwjgl.glfw.GLFW;
 
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public class KeyBindings {
 
     public static final KeyMapping OPEN_CONFIG = new KeyMapping(
@@ -35,10 +35,10 @@ public class KeyBindings {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
         // 避免在配置界面重复打开
-        if (mc.screen instanceof VerityConfigScreen) return;
+        if (mc.screen instanceof VerityPlusScreen) return;
 
         while (OPEN_CONFIG.consumeClick()) {
-            mc.setScreen(new VerityConfigScreen());
+            mc.setScreen(new VerityPlusScreen());
         }
     }
 }

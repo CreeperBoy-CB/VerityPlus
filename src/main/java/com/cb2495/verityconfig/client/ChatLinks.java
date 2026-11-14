@@ -54,7 +54,7 @@ public final class ChatLinks {
 
     /** 一段普通文字，前面挂上模组名前缀（黄色），正文自定颜色。 */
     public static Component prefixed(String text, ChatFormatting textColor) {
-        return Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+        return Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                 .append(Component.literal(text).withStyle(textColor));
     }
 }

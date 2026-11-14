@@ -181,8 +181,7 @@ public final class VerityConfigScreenFactory {
                     .text(Component.literal("打开"))
                     .description(OptionDescription.of(Component.literal(
                             "在您自己的电脑上运行 Verity 的 AI：免费、私密、无需 API 密钥。\n"
-                                    + "一键安装 Ollama 并下载小模型，同时列出此电脑上已有的 Ollama 模型。\n\n"
-                                    + "这个界面由 Verity 提供，暂时还是英文。")))
+                                    + "一键安装 Ollama 并下载小模型，同时列出此电脑上已有的 Ollama 模型。")))
                     .action((screen, option) -> openOllamaSetup(previous))
                     .build());
         }
@@ -290,6 +289,8 @@ public final class VerityConfigScreenFactory {
         ConfigCategory.Builder category = ConfigCategory.createBuilder().name(Component.literal("语音识别"));
         enumOption(category, "STT_PROVIDER", null);
         string(category, "GROQ_KEY");
+        // 原版还有这一项，之前的界面漏了；只有本地/Whisper 那类自建服务才用得上
+        string(category, "STT_MODEL");
         return category.build();
     }
 
@@ -723,6 +724,7 @@ public final class VerityConfigScreenFactory {
             // 语音识别
             case "STT_PROVIDER" -> "识别服务商";
             case "GROQ_KEY" -> "Groq API 密钥";
+            case "STT_MODEL" -> "自定义 STT 模型";
             // 个性化
             case "COLOR" -> "自定义颜色 [色相]";
             case "VERITY_CUSTOM_NAME" -> "自定义名称";
@@ -764,6 +766,7 @@ public final class VerityConfigScreenFactory {
             case "ENDPOINT_VOICE" -> "所选 TTS 服务商使用的音色（Cartesia 音色 ID、Kokoro）。";
             case "STT_PROVIDER" -> "用于语音转文字（STT）的服务商。";
             case "GROQ_KEY" -> "用于 Groq 语音识别的 API 密钥。";
+            case "STT_MODEL" -> "自定义的语音识别模型。";
             case "COLOR" -> "0 = 原始颜色。1-360 = 色调。";
             case "VERITY_CUSTOM_NAME" -> "将 Verity 重命名为任何你喜欢的名字！";
             case "PERSONALITY" -> "在同一个世界中多次更改可能会导致冲突。";

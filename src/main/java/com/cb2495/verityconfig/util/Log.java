@@ -9,7 +9,7 @@ import org.slf4j.Logger;
  * 这些输出绕过了 Forge 使用的 SLF4J，既不受日志级别控制，也不会写进日志文件，
  * 玩家反馈问题时经常在日志里找不到线索。
  * <p>logger 名字由 {@link LogUtils#getLogger()} 按调用类生成，所以消息里不必再带
- * 「[VerityConfig]」前缀。
+ * 「[VerityPlus]」前缀。
  * <p>用法上只推荐两种形式，避免 SLF4J 的占位符歧义：
  * <ul>
  *   <li>{@code Log.error("读取失败: " + file, e)} —— 带异常的固定消息</li>

@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.util.Log;
 
 import net.minecraft.client.gui.screens.Screen;
@@ -43,7 +43,7 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
  * 所以另外补了一道保险（{@link ScreenGuard}）：每次 Mods 列表界面初始化时
  * 无条件再挂一遍，点 Config 按钮时一定是我们这一份。
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT,
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT,
         bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class VerityConfigScreenHook {
 
@@ -117,7 +117,7 @@ public final class VerityConfigScreenHook {
      *
      * <p>放在 FORGE 总线上（而不是 Mod 总线）：界面事件只在游戏运行时发生。
      */
-    @Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT,
+    @Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT,
             bus = Mod.EventBusSubscriber.Bus.FORGE)
     public static final class ScreenGuard {
 

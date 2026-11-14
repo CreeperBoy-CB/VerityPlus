@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.screen;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.help.HelpText;
 import com.cb2495.verityconfig.util.Log;
 import com.cb2495.verityconfig.widget.ScrollableArea;
@@ -117,7 +117,7 @@ public class QandAScreen extends Screen {
             categorizedEntries.put(cat, new ArrayList<>());
         }
 
-        ResourceLocation res = new ResourceLocation(VerityConfig.MODID, "help/qanda.txt");
+        ResourceLocation res = new ResourceLocation(VerityPlus.MODID, "help/qanda.txt");
         String currentCat = CATEGORIES[0]; // 默认分类为第一个
 
         try {

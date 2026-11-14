@@ -131,7 +131,7 @@ public class AdvancedSettingsScreen extends Screen {
         this.saveButton = Button.builder(Component.literal("返回"), btn -> {
             // 返回是明确的一次结束操作，立即保存并取消已排队的去抖
             pendingSave.runNow();
-            Minecraft.getInstance().setScreen(new VerityConfigScreen());
+            Minecraft.getInstance().setScreen(new VerityPlusScreen());
         }).pos(this.width - 80, 3).size(70, 20).build();
         this.addRenderableWidget(this.saveButton);
 

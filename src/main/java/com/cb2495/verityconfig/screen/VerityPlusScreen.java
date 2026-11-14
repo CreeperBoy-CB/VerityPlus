@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.screen;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.config.ModConfig;
 import com.cb2495.verityconfig.config.Providers;
 import com.cb2495.verityconfig.config.VerityConfigManager;
@@ -26,7 +26,7 @@ import java.io.InputStream;
 import java.util.*;
 
 @SuppressWarnings("removal")
-public class VerityConfigScreen extends Screen {
+public class VerityPlusScreen extends Screen {
 
     // ---------- 提供商与模型数据 ----------
     // 提供商清单（端点、API 格式、Key 地址、可选模型）统一在 Providers 里维护，
@@ -106,7 +106,7 @@ public class VerityConfigScreen extends Screen {
     private boolean sponsorExpanded = false;
     private Button sponsorButton;
 
-    public VerityConfigScreen() {
+    public VerityPlusScreen() {
         super(Component.literal("Verity AI 配置"));
     }
 
@@ -236,7 +236,7 @@ public class VerityConfigScreen extends Screen {
                 value -> saveConfig());
         this.addRenderableWidget(this.ttsProviderDropdown);
         // 手机端把 Verity™ 灰显并拦截点击：点了不会改配置，而是变红 + 抖动 + 提示
-        this.ttsProviderDropdown.setOptionDisabled(VerityConfigScreen::isTtsValueDisabled);
+        this.ttsProviderDropdown.setOptionDisabled(VerityPlusScreen::isTtsValueDisabled);
         this.ttsProviderDropdown.setOnDisabledClick(value -> showTtsPlatformReject());
         // 关闭语音时隐藏下拉框
         this.ttsProviderDropdown.visible = loadedConfig.useTTS;
@@ -326,7 +326,7 @@ public class VerityConfigScreen extends Screen {
     private void loadSponsorTexture() {
         // 先把上一次注册的纹理释放掉，原因见 releaseSponsorTexture
         releaseSponsorTexture();
-        ResourceLocation res = new ResourceLocation(VerityConfig.MODID, "textures/sponsor_qr.png");
+        ResourceLocation res = new ResourceLocation(VerityPlus.MODID, "textures/sponsor_qr.png");
         try {
             var resource = Minecraft.getInstance().getResourceManager().getResource(res).orElseThrow();
             try (InputStream is = resource.open()) {

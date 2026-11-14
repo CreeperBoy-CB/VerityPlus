@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.screen;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.util.Log;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
@@ -18,7 +18,7 @@ import java.io.InputStream;
 
 @SuppressWarnings("removal")
 public class SponsorScreen extends Screen {
-    private static final ResourceLocation SPONSOR_TEXTURE = new ResourceLocation(VerityConfig.MODID, "textures/sponsor_qr.png");
+    private static final ResourceLocation SPONSOR_TEXTURE = new ResourceLocation(VerityPlus.MODID, "textures/sponsor_qr.png");
 
     private ResourceLocation loadedTexture;
     private int imageWidth, imageHeight;   // 原始像素尺寸
@@ -35,7 +35,7 @@ public class SponsorScreen extends Screen {
 
         // 退出按钮
         this.addRenderableWidget(Button.builder(Component.literal("退出"), btn -> {
-            Minecraft.getInstance().setScreen(new VerityConfigScreen());
+            Minecraft.getInstance().setScreen(new VerityPlusScreen());
         }).pos(this.width / 2 - 50, this.height - 40).size(100, 20).build());
     }
 
@@ -132,6 +132,6 @@ public class SponsorScreen extends Screen {
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(new VerityConfigScreen());
+        Minecraft.getInstance().setScreen(new VerityPlusScreen());
     }
 }

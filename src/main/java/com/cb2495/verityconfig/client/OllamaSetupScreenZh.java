@@ -447,22 +447,33 @@ public final class OllamaSetupScreenZh extends Screen {
         hudButton.setMessage(hudLabel());
     }
 
-    /** 卸载走 Verity 自己的确认界面，由它处理「保留模型 / 删除模型」。 */
+    /** 卸载走确认界面，由它处理「保留模型 / 删除模型」。 */
     private void onRemove() {
+        Consumer<Boolean> callback = chosen -> {
+            invokeStatic(MANAGER, "uninstallOllama",
+                    new Class<?>[]{boolean.class}, Boolean.TRUE.equals(chosen));
+            minecraft.setScreen(this);
+        };
+        // 优先用中文版确认界面；Verity 的类换了名字时退回它自己的英文界面
+        Screen screen = OllamaUninstallScreenZh.create(this, callback);
+        if (screen == null) {
+            screen = verityUninstallScreen(callback);
+        }
+        if (screen != null) minecraft.setScreen(screen);
+    }
+
+    /** Verity 自己的卸载界面，只在前面的中文版打不开时才用。 */
+    private Screen verityUninstallScreen(Consumer<Boolean> callback) {
         try {
             Class<?> cls = verityClass("varmite.verity.client.gui.OllamaUninstallScreen");
-            if (cls == null) return;
-            @SuppressWarnings("unchecked")
-            Consumer<Boolean> callback = chosen -> {
-                invokeStatic(MANAGER, "uninstallOllama",
-                        new Class<?>[]{boolean.class}, Boolean.TRUE.equals(chosen));
-                minecraft.setScreen(this);
-            };
-            Screen screen = (Screen) cls.getConstructor(Screen.class, Consumer.class)
+            if (cls == null) return null;
+            // 类名没变但实现可能已经不是 Screen 了，先确认再强转
+            if (!Screen.class.isAssignableFrom(cls)) return null;
+            return (Screen) cls.getConstructor(Screen.class, Consumer.class)
                     .newInstance(this, callback);
-            minecraft.setScreen(screen);
         } catch (ReflectiveOperationException | RuntimeException e) {
             Log.warn("打不开 Ollama 卸载确认界面: " + e);
+            return null;
         }
     }
 
@@ -777,10 +788,14 @@ public final class OllamaSetupScreenZh extends Screen {
     // HUD 相关
     // ============================================================
 
-    /** 进度面板开关按钮的文字。 */
+    /**
+     * 进度面板开关按钮的文字。
+     * <p>格式与 Verity 原版的 {@code HUD [键]: 开/关} 一致：按键名完整显示在按钮上，
+     * 这样不用悬停提示也知道按哪个键。原版按钮宽 100，放不下时会自动截断。
+     */
     private static Component hudLabel() {
         boolean on = OllamaHudTranslator.isHudEnabled();
-        return Component.literal("进度面板：" + (on ? "开启" : "关闭"));
+        return Component.literal("面板 [" + hudKeyName() + "]：" + (on ? "开" : "关"));
     }
 
     private static String hudKeyName() {

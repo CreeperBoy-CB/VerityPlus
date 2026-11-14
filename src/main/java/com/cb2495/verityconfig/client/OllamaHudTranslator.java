@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.util.Log;
 
 import net.minecraft.client.Minecraft;
@@ -26,7 +26,7 @@ import java.lang.reflect.Method;
  * 本模组不重复实现下载逻辑，只负责显示。
  * <p>Verity 没装时整层不注册。
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT,
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT,
         bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class OllamaHudTranslator {
 
@@ -299,12 +299,14 @@ public final class OllamaHudTranslator {
     }
 
     private static String detail(Object snapshot) {
-        String detail = text(snapshot, "detail");
+        String detail = translateDetail(text(snapshot, "detail"));
         int queued = (int) number(snapshot, "queued");
+        // 「+N 个队列中」是中文，必须拼在翻译之后：
+        // 拼在前面的话整行成了中英混排，translateDetail 对不上任何词条，前面那半句就漏翻了
         if (queued > 0) {
             detail = detail + "  (+" + queued + " 个队列中)";
         }
-        return translateDetail(detail);
+        return detail;
     }
 
     /** 把 Verity 的明细文字换成中文；带数字的百分比行原样保留。 */

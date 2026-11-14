@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.screen;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.save.LegacySaveScanner;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -18,7 +18,7 @@ public class WelcomeScreen extends Screen {
 
     public WelcomeScreen() {
         super(Component.literal("欢迎"));
-        VerityConfig.loadVersions(); // 使用统一版本加载
+        VerityPlus.loadVersions(); // 使用统一版本加载
         checkMemory();
     }
 
@@ -65,11 +65,11 @@ public class WelcomeScreen extends Screen {
         }
 
         if (saves.isEmpty()) {
-            mc.setScreen(new VerityConfigScreen());
+            mc.setScreen(new VerityPlusScreen());
             return;
         }
         mc.setScreen(new LegacySaveImportScreen(saves, this,
-                () -> mc.setScreen(new VerityConfigScreen())));
+                () -> mc.setScreen(new VerityPlusScreen())));
     }
 
     @Override

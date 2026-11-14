@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.util.Log;
 
 import net.minecraft.ChatFormatting;
@@ -34,15 +34,15 @@ import java.util.List;
  * </pre>
  * 两枚合计仍然占满原来那 200 像素的横向范围。
  *
- * <p><b>为什么不走 {@link VerityTranslator} 的翻译表：</b>那个钩子换的是
- * {@code Component#getString()}，只对聊天消息有效。按钮绘制走的是
+ * <p><b>为什么不靠聊天/界面翻译那套机制：</b>按钮绘制走的是
  * {@code AbstractWidget#renderScrollingString}，拿到 {@code Component} 后直接按
- * {@code FormattedCharSequence} 分段画，<b>全程不调用 {@code getString()}</b>。
+ * {@code FormattedCharSequence} 分段画，<b>全程不调用 {@code getString()}</b>，
+ * 所以包 {@code getString()} 那种做法在这里根本不生效，只能直接换掉组件的文字。
  *
  * <p><b>左半边只改文字和宽度</b>，点击行为完全不动，所以就算 Verity 哪天改了链接，
  * 作者那一半仍然正确。<b>右半边是我们自己 new 的按钮。</b>
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public final class TitleButtonTranslator {
 
     private TitleButtonTranslator() {}

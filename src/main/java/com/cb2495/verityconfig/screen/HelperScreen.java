@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.screen;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.help.HelpReadTracker;
 import com.cb2495.verityconfig.help.HelpText;
 import com.cb2495.verityconfig.util.ConfigIO;
@@ -247,7 +247,7 @@ public class HelperScreen extends Screen {
         String fileName = currentPlatform == Platform.WINDOWS
                 ? topic + "_pc.txt"
                 : topic + "_mobile.txt";
-        ResourceLocation res = new ResourceLocation(VerityConfig.MODID, "help/" + fileName);
+        ResourceLocation res = new ResourceLocation(VerityPlus.MODID, "help/" + fileName);
 
         try {
             Resource resource = Minecraft.getInstance().getResourceManager().getResource(res).orElseThrow();
@@ -365,7 +365,7 @@ public class HelperScreen extends Screen {
         // 图片不再按平台分目录：同一主题下 PC 与手机共用 pngres/<topic>/，
         // 文件名本身已能区分（PC 多为 pcl_*.png，手机多为 fcl_*.jpg）
         try {
-            return new ResourceLocation(VerityConfig.MODID, "help/pngres/" + topic + "/" + imageName);
+            return new ResourceLocation(VerityPlus.MODID, "help/pngres/" + topic + "/" + imageName);
         } catch (Exception e) {
             Log.warn("非法图片路径: " + topic + "/" + imageName);
             return null;
@@ -375,7 +375,7 @@ public class HelperScreen extends Screen {
     /** 注册动态纹理用的名字；带主题前缀，避免不同主题的同名图片互相顶掉。 */
     private ResourceLocation textureLocation(String imageName) {
         try {
-            return new ResourceLocation(VerityConfig.MODID, "helpimage/" + topic + "/" + imageName);
+            return new ResourceLocation(VerityPlus.MODID, "helpimage/" + topic + "/" + imageName);
         } catch (Exception e) {
             return null;
         }

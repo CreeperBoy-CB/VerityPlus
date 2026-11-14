@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.util.Log;
 
 import net.minecraft.ChatFormatting;
@@ -23,7 +23,7 @@ import java.lang.reflect.Field;
  * 是因为 {@code @Mod.EventBusSubscriber} 只扫描模组自己的顶层类，
  * 写成 {@link OllamaHudTranslator} 的内部类注册不上（之前踩过这个坑）。
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public final class OllamaHudScreenHook {
 
     private OllamaHudScreenHook() {}

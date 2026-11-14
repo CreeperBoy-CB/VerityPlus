@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.util.Log;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -37,7 +37,7 @@ import java.nio.file.Path;
  * 两者都只安排待处理操作，在玩家退出存档、回到世界选择界面时执行，
  * 避免在游戏运行中改动正在读写的文件（退出存档后文件句柄已关闭）。
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public class VerityMemoryManager {
 
     public static final String[] FILES = {
@@ -161,7 +161,7 @@ public class VerityMemoryManager {
         pendingResultError = false;
 
         player.displayClientMessage(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal(result)
                                 .withStyle(error ? ChatFormatting.RED : ChatFormatting.GREEN)),
                 false);
@@ -237,7 +237,7 @@ public class VerityMemoryManager {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.displayClientMessage(
-                    Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                    Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                             .append(Component.literal(text).withStyle(ChatFormatting.WHITE)),
                     false);
         }

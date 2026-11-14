@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.save;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
@@ -97,7 +97,7 @@ public final class SaveIconCache {
             int height = image.getHeight();
             // 贴图名不能带路径分隔符与非法字符，用哈希代替原始路径
             ResourceLocation location = new ResourceLocation(
-                    com.cb2495.verityconfig.VerityConfig.MODID,
+                    com.cb2495.verityconfig.VerityPlus.MODID,
                     "save_icon/" + Integer.toHexString(key.hashCode()));
             DynamicTexture texture = new DynamicTexture(image);
             Minecraft.getInstance().getTextureManager().register(location, texture);

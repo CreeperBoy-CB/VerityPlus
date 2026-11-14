@@ -1,11 +1,11 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 import com.cb2495.verityconfig.config.ModConfig;
 import com.cb2495.verityconfig.screen.HelperScreen;
 import com.cb2495.verityconfig.screen.ModsListScreen;
 import com.cb2495.verityconfig.screen.QandAScreen;
-import com.cb2495.verityconfig.screen.VerityConfigScreen;
+import com.cb2495.verityconfig.screen.VerityPlusScreen;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.ChatFormatting;
@@ -23,7 +23,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @SuppressWarnings("removal")
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public class ClientCommands {
 
     @SubscribeEvent
@@ -147,7 +147,7 @@ public class ClientCommands {
     }
 
     private static void openConfigScreen() {
-        Minecraft.getInstance().setScreen(new VerityConfigScreen());
+        Minecraft.getInstance().setScreen(new VerityPlusScreen());
     }
 
     /**
@@ -172,7 +172,7 @@ public class ClientCommands {
             moment = day.atTime(hour, minute);
         } catch (Exception e) {
             mc.player.displayClientMessage(
-                    Component.literal("[VerityConfig] 时间格式错误，应为 /vc dshint date YYYY-MM-DD mm.ss，例如 2026-10-01 10.00")
+                    Component.literal("[VerityPlus] 时间格式错误，应为 /vc dshint date YYYY-MM-DD mm.ss，例如 2026-10-01 10.00")
                             .withStyle(ChatFormatting.RED),
                     false);
             return;
@@ -187,7 +187,7 @@ public class ClientCommands {
         if (mc.player == null) return;
 
         mc.player.displayClientMessage(
-                Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+                Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("DeepSeek 峰谷时段提示已").withStyle(ChatFormatting.WHITE))
                         .append(Component.literal(enabled ? "开启" : "关闭")
                                 .withStyle(enabled ? ChatFormatting.GREEN : ChatFormatting.RED))
@@ -199,7 +199,7 @@ public class ClientCommands {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
-        Component msg = Component.literal("[VerityConfig] ").withStyle(ChatFormatting.YELLOW)
+        Component msg = Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                 .append(Component.literal("输入 ").withStyle(ChatFormatting.WHITE))
                 .append(ChatLinks.suggestCmd("/vc help", ChatLinks.CLICK_TO_FILL))
                 .append(Component.literal(" 查看指令列表，或 ").withStyle(ChatFormatting.WHITE))
@@ -213,7 +213,7 @@ public class ClientCommands {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
 
-        mc.player.displayClientMessage(Component.literal("==== VerityConfig 指令 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
+        mc.player.displayClientMessage(Component.literal("==== VerityPlus 指令 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
         mc.player.displayClientMessage(ChatLinks.suggestLine("/vc cs", "打开配置界面"), false);
         mc.player.displayClientMessage(ChatLinks.suggestLine("/vc modls", "打开模组管理界面"), false);
         mc.player.displayClientMessage(ChatLinks.suggestLine("/vc help", "查看此列表"), false);
@@ -236,7 +236,7 @@ public class ClientCommands {
             mc.setScreen(new HelperScreen(topic));
         } else {
             mc.player.displayClientMessage(
-                    Component.literal("[VerityConfig] 未找到帮助主题: " + topic)
+                    Component.literal("[VerityPlus] 未找到帮助主题: " + topic)
                             .withStyle(ChatFormatting.RED),
                     false
             );
@@ -245,7 +245,7 @@ public class ClientCommands {
 
     private static boolean doesResourceExist(String path) {
         try {
-            ResourceLocation res = new ResourceLocation(VerityConfig.MODID, path);
+            ResourceLocation res = new ResourceLocation(VerityPlus.MODID, path);
             return Minecraft.getInstance().getResourceManager().getResource(res).isPresent();
         } catch (Exception e) {
             return false;

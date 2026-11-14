@@ -1,6 +1,6 @@
 package com.cb2495.verityconfig.client;
 
-import com.cb2495.verityconfig.VerityConfig;
+import com.cb2495.verityconfig.VerityPlus;
 
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -36,7 +36,7 @@ import java.util.List;
  * <p><b>为什么要用几何而不是"最底下那几个"：</b>窗口很矮的时候，主按钮组可能一直排到
  * 底部以后，单纯"取最下面四个"会挪错东西。认准原始 y 值最稳。
  */
-@Mod.EventBusSubscriber(modid = VerityConfig.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = VerityPlus.MODID, value = Dist.CLIENT)
 public final class TitleBottomRowShift {
 
     private TitleBottomRowShift() {}
