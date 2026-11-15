@@ -1,6 +1,7 @@
 package com.cb2495.verityconfig.screen;
 
 import com.cb2495.verityconfig.VerityPlus;
+import com.cb2495.verityconfig.client.ModpackHelperBridge;
 import com.cb2495.verityconfig.config.ModConfig;
 import com.cb2495.verityconfig.config.Providers;
 import com.cb2495.verityconfig.config.VerityConfigManager;
@@ -254,10 +255,10 @@ public class VerityPlusScreen extends Screen {
             // 两边都生效时就不必再打扰玩家去重启。
             boolean reloaded = saveConfigAndReload();
             if (ModsListScreen.firstTimeSetup) {
-                // 注意：不要在这里把 firstTimeSetup 置回 false。
-                // ModsListScreen.init() 要靠它来决定是否执行首次自动启用模组，
-                // 提前清掉会导致自动启用永远不触发。
-                Minecraft.getInstance().setScreen(new ModsListScreen());
+                // 首次启动流程的收尾站：先把自动启停（输入法冲突修复，按平台决定）
+                // 处理掉，再看还有没有需要重启的改动。
+                // 注意：不要在这里把 firstTimeSetup 置回 false，由 finishFirstTimeSetup() 负责。
+                openModsRemovedPage();
             } else if (!reloaded) {
                 // 有一边没能即时生效，退回提示重启。
                 // 注意这里必须弹框：它同时承担「离开本界面」的职责，
@@ -288,19 +289,60 @@ public class VerityPlusScreen extends Screen {
             Minecraft.getInstance().setScreen(new AdvancedSettingsScreen());
         }).pos(this.width - 80, 5).size(70, 20).build());
 
-        // 配置模组按钮（仅非首次启动显示）
-        if (!ModsListScreen.firstTimeSetup) {
-            this.addRenderableWidget(Button.builder(Component.literal("配置模组"), btn -> {
-                ModsListScreen.returnToConfigScreen = true;
-                Minecraft.getInstance().setScreen(new ModsListScreen());
-            }).pos(this.width - 80, 30).size(70, 20).build());
-        }
+        this.addRenderableWidget(Button.builder(Component.literal("配置模组"), btn -> {
+            openModsRemovedPage();
+        }).pos(this.width - 80, 30).size(70, 20).build());
 
         updateSponsorButtonText();
     }
 
+    /**
+     * 打开「模组管理功能已移除」说明页。
+     * <p>该页已搬到 Modpack Helper（它链接的两份模组教程也在那边），这里走反射桥；
+     * 没装 Modpack Helper 时退回到本模组的一条纯文字说明，不让按钮点下去没反应。
+     */
+    private static void openModsRemovedPage() {
+        if (ModpackHelperBridge.openModsRemoved(VerityPlusScreen::finishFirstTimeSetup)) {
+            return;
+        }
+        showHelperMissingNotice();
+    }
+
+    /**
+     * 没有安装 Modpack Helper 时的降级提示。
+     * <p>说明页、帮助页都在 Modpack Helper 里；没装的时候相关按钮不能
+     * 「点了没反应」，这里给一句明确的「该装哪个」。
+     */
+    private static void showHelperMissingNotice() {
+        OpenUrlScreen.showNotice("缺少 Modpack Helper",
+                "这个功能位于 Modpack Helper 模组中，请先安装它。");
+    }
+
+    /**
+     * 首次启动流程的收尾：自动启停模组、复位首次启动标记，再决定是否需要重启。
+     * <p>由「模组管理功能已移除」那页点「跳过」时调用（Esc 关闭也走同一条路径），
+     * 所以即使玩家直接跳过，首次启动的自动启停照样会执行一次。
+     * <p>收尾后不再有任何界面可回：没有改动就直接退出界面，
+     * 免得玩家从游戏里退回欢迎页、把整套配置流程又走一遍。
+     */
+    private static void finishFirstTimeSetup() {
+        boolean changed;
+        try {
+            changed = ModsListScreen.applyFirstTimeSetup();
+        } catch (RuntimeException e) {
+            // 收尾本身出错也要把流程走完，不能把玩家留在半路
+            Log.error("首次启动收尾失败: " + e);
+            changed = false;
+        }
+        if (changed) {
+            RestartPrompt.show("重启以重载模组", "启用/禁用模组需要重启才能应用，是否重启？");
+        } else {
+            Minecraft.getInstance().setScreen(null);
+        }
+    }
+
     private void showRestartConfirm() {
-        // 与模组管理、教程提醒界面共用同一个确认框
+        // 与首次启动收尾界面共用同一个确认框
         RestartPrompt.show();
     }
 

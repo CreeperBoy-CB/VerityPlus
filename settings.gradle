@@ -11,3 +11,10 @@ pluginManagement {
 plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '0.7.0'
 }
+
+rootProject.name = 'VerityPlus'
+
+include 'modpackhelper'
+// ModPackHelper 是独立仓库，放在同级目录。用相对路径 include 它，
+// 两个工程就能在同一次 Gradle 构建里互相引用源码与 classpath。
+project(':modpackhelper').projectDir = file('../ModPackHelper')

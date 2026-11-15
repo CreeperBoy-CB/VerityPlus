@@ -105,7 +105,9 @@ public class VerityPlus {
 
         for (File file : files) {
             String name = file.getName();
-            if (name.startsWith("[Verity拓展增强]")) {
+            // 现在发布的文件名是 [VerityPlus]…；旧的 [Verity拓展增强]… 也一并认，
+            // 否则用旧版文件名升级上来的玩家会在欢迎页看到「配置工具版本: 未知」
+            if (name.startsWith("[VerityPlus]") || name.startsWith("[Verity拓展增强]")) {
                 ModsListScreen.configModVersion = extractVersion(name);
             } else if (name.startsWith("[Verity]")) {
                 ModsListScreen.verityVersion = extractVersion(name);

@@ -1,14 +1,12 @@
 package com.cb2495.verityconfig.screen;
 
 import com.cb2495.verityconfig.VerityPlus;
-import com.cb2495.verityconfig.save.LegacySaveScanner;
+import com.cb2495.verityconfig.client.ModpackHelperBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-
-import java.util.List;
 
 
 public class WelcomeScreen extends Screen {
@@ -37,7 +35,11 @@ public class WelcomeScreen extends Screen {
     protected void init() {
         // 创建“点击此处获取解决方法”按钮（仅内存不足时显示）
         this.solutionButton = Button.builder(Component.literal("点击此处获取解决方法"), btn -> {
-            Minecraft.getInstance().setScreen(new HelperScreen());
+            // 帮助界面在 Modpack Helper 里；没装时给出明确提示，不让按钮点了没反应
+            if (!ModpackHelperBridge.openHelp(null, "low_memory")) {
+                OpenUrlScreen.showNotice("缺少 Modpack Helper",
+                        "帮助文档位于 Modpack Helper 模组中，请先安装它。");
+            }
         }).pos(this.width / 2 - 100, this.height / 2 + 6).size(200, 20).build();
         this.solutionButton.visible = memoryWarning != null; // 无警告时隐藏
         this.addRenderableWidget(this.solutionButton);
@@ -45,31 +47,24 @@ public class WelcomeScreen extends Screen {
         int centerX = this.width / 2;
         this.addRenderableWidget(Button.builder(Component.literal("继续"), btn -> {
             ModsListScreen.firstTimeSetup = true; // 标记为首次启动流程
+            // 老整合包不写 apiKey，老玩家每次启动都会看到欢迎页。
+            // 顺手把「按平台自动启用模组」也补上：这一步不会改动用户已经配好的开关
+            ModsListScreen.pendingAutoEnable = true;
             proceedAfterScan();
         }).pos(centerX - 50, this.height - 50).size(100, 20).build());
     }
 
     /**
-     * 点「继续」后先扫描旧整合包存档：扫到才弹导入页，没扫到直接进配置界面。
-     * <p>扫描放在点击时而不是 {@link #init()} 里，是为了不在玩家还没决定
-     * 走流程时就去读磁盘；开销也不大 —— 只列目录，最多读几个 level.dat。
+     * 点「继续」后先看看有没有旧整合包存档：有就弹导入页，没有直接进配置界面。
+     * <p>扫描与导入界面都在 Modpack Helper 里，没装时直接跳过这一步。
      */
     private void proceedAfterScan() {
         Minecraft mc = Minecraft.getInstance();
-        List<LegacySaveScanner.LegacySave> saves;
-        try {
-            saves = LegacySaveScanner.scan(mc.gameDirectory.toPath());
-        } catch (Exception e) {
-            // 扫描属于附加功能，出问题不该挡住正常流程
-            saves = List.of();
-        }
-
-        if (saves.isEmpty()) {
-            mc.setScreen(new VerityPlusScreen());
+        // 导入页结束后照旧进配置界面
+        if (ModpackHelperBridge.openLegacySaveImport(this, () -> mc.setScreen(new VerityPlusScreen()))) {
             return;
         }
-        mc.setScreen(new LegacySaveImportScreen(saves, this,
-                () -> mc.setScreen(new VerityPlusScreen())));
+        mc.setScreen(new VerityPlusScreen());
     }
 
     @Override

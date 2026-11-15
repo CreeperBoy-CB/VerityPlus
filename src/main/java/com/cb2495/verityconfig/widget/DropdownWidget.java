@@ -95,7 +95,7 @@ public class DropdownWidget<T> extends AbstractWidget {
     // ---------- 按钮内的警告覆盖层 ----------
     /**
      * 警告提示的显示时长与淡出时长（毫秒）。
-     * <p>取值与 {@code ModsListScreen} 的平台拒绝提示一致，两处观感统一。
+     * <p>取值与配置界面上「安卓设备暂不支持」的警告一致，两处观感统一。
      */
     private static final long WARN_HOLD_MS = 2500;
     private static final long WARN_FADE_MS = 500;

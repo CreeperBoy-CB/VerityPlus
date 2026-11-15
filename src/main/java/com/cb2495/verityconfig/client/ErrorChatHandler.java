@@ -209,7 +209,7 @@ public class ErrorChatHandler {
         pendingComponents.add(
                 Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("填写了错误的 API Key，请输入 ").withStyle(ChatFormatting.WHITE))
-                        .append(ChatLinks.suggestCmd("/vc cs", ChatLinks.CLICK_TO_FILL))
+                        .append(ModpackHelperBridge.suggestCmd("/vc cs", ModpackHelperBridge.CLICK_TO_FILL))
                         .append(Component.literal(" 并重新走一遍 AI 配置流程").withStyle(ChatFormatting.WHITE))
         );
         pendingTicks = 2;
@@ -219,13 +219,13 @@ public class ErrorChatHandler {
         pendingComponents.add(
                 Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("记忆文件错误，可以尝试 ").withStyle(ChatFormatting.WHITE))
-                        .append(ChatLinks.suggestCmd("/vc verity mfix", ChatLinks.CLICK_TO_FILL))
+                        .append(ModpackHelperBridge.suggestCmd("/vc verity mfix", ModpackHelperBridge.CLICK_TO_FILL))
                         .append(Component.literal(" 修复聊天记忆。").withStyle(ChatFormatting.WHITE))
         );
         pendingComponents.add(
                 Component.literal("[VerityPlus] ").withStyle(ChatFormatting.YELLOW)
                         .append(Component.literal("如果仍不起作用，可使用 ").withStyle(ChatFormatting.WHITE))
-                        .append(ChatLinks.suggestCmd("/vc verity mdel", ChatLinks.CLICK_TO_FILL))
+                        .append(ModpackHelperBridge.suggestCmd("/vc verity mdel", ModpackHelperBridge.CLICK_TO_FILL))
                         .append(Component.literal(" 删除记忆文件让 Verity 重新生成。").withStyle(ChatFormatting.WHITE))
         );
         pendingTicks = 2;
@@ -253,7 +253,7 @@ public class ErrorChatHandler {
         pendingTicks = 2;
     }
 
-    // 「可点击填入指令」的组件构造已提取到 ChatLinks
+    // 「可点击填入指令」的组件构造已搬到 Modpack Helper 的 ChatLinks，这里经 ModpackHelperBridge 调用
 
     // ---------- 2 tick 延迟发送 ----------
     @SubscribeEvent

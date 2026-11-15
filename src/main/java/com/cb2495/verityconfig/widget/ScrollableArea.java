@@ -6,8 +6,8 @@ import net.minecraft.util.Mth;
 /**
  * 列表的滚动状态与滚动条。
  * <p>滚轮的响应范围由这里统一判断：只有鼠标落在视口内才滚动，
- * 否则在标题栏/遮罩上滚滚轮也会把列表滚走。各界面原本各写一份，
- * 只有「高级设置」写对了，其余四处都漏了这个判断。
+ * 否则在标题栏/遮罩上滚滚轮也会把列表滚走。帮助、常见问题那几个界面
+ * 搬去 Modpack Helper 之后自带了一份同样的实现，这里只服务「高级设置」。
  */
 public class ScrollableArea {
     private int scrollOffset = 0;
@@ -108,8 +108,8 @@ public class ScrollableArea {
     // ---------- 拖动滚动条 ----------
     /**
      * 是否正在拖动滚动条。
-     * <p>状态放在这里而不是各个界面里：5 个界面原本各自维护一个
-     * {@code draggingScrollbar} 字段，再各写一遍「按下 / 拖动 / 松开」三件套，
+     * <p>状态放在这里而不是各个界面里：按下、拖动、松开原本各自维护一个
+     * {@code draggingScrollbar} 字段，再各写一遍三件套，
      * 坐标换算抄错一处就会出现「拖不动」或「拖到别处」。
      */
     private boolean draggingScrollbar = false;
