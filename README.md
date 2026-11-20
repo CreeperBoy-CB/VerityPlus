@@ -1,6 +1,6 @@
 # Verity Plus
 
-> modid: `verityconfig`
+> modid: `verityplus`
 
 Minecraft Java 版 **1.20.1 / Forge 47.4.21** 的客户端辅助模组，用于更便捷地配置
 
@@ -94,19 +94,22 @@ Verity JE 本体把 AI、语音、本地模型等设置放在一个由 Yet Anoth
 |---|---|
 | `config/verity-common.toml` | Verity 本体的配置（本模组也读写它） |
 | `config/verity-common-m.toml` | 手机端模板 |
-| `config/verityconfig-common.toml` | 本模组自己的开关（赞助码、峰谷提示等） |
+| `config/verityplus-common.toml` | 本模组自己的开关（赞助码、峰谷提示等） |
 | `config/simple_translate/*.json` | 简单翻译模组的联动配置 |
 
-首次启动时若缺少 `verity-common.toml`，会用 `assets/verityconfig/config/`
+首次启动时若缺少 `verity-common.toml`，会用 `assets/verityplus/config/` 下的模板补齐；
+已存在的文件不会被覆盖。
 
-下的模板补齐；已存在的文件不会被覆盖。
+> **从旧版本升级**：modid 从 `verityconfig` 改为 `verityplus` 时配置文件也跟着换了名字，
+> 首次启动会自动把 `config/verityconfig-common.toml` 改名为 `config/verityplus-common.toml`，
+> 不需要手动处理。
 
 ---
 
 ## 五、目录结构与代码导航
 
 ```
-src/main/java/com/cb2495/verityconfig/
+src/main/java/com/cb2495/verityplus/
 ├── VerityPlus.java                    模组入口，版本扫描，标题界面事件
 ├── client/                            客户端行为（19 个类）
 │   ├── ChatFilter.java                聊天消息入口，只做翻译链路
@@ -138,7 +141,7 @@ src/main/java/com/cb2495/verityconfig/
 
 src/main/resources/
 ├── assets/verity/lang/zh_cn.json      覆盖 Verity 的内置语言文件
-├── assets/verityconfig/config/        配置模板
+├── assets/verityplus/config/          配置模板
 ├── data/verity/advancements/          进度（成就）的中文覆盖
 └── META-INF/mods.toml                 模组元数据
 ```
