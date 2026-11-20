@@ -2,12 +2,13 @@ package com.cb2495.verityplus.client;
 
 import com.cb2495.verityplus.VerityPlus;
 import com.cb2495.verityplus.config.ModConfig;
-import com.cb2495.verityplus.screen.VerityPlusScreen;
+import com.cb2495.verityplus.util.Log;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -151,7 +152,32 @@ public class ClientCommands {
     }
 
     private static void openConfigScreen() {
-        Minecraft.getInstance().setScreen(new VerityPlusScreen());
+        Screen screen = openVerityConfig();
+        if (screen != null) Minecraft.getInstance().setScreen(screen);
+    }
+
+    /**
+     * 打开 Verity 自己的配置界面（中文版）。
+     * <p>本模组原来有一套自己的 AI 配置界面，功能与 Verity 原生的配置界面完全重合，
+     * 所以那套界面连同 {@code /vc cs} 的旧目标一起移除了；现在这个入口
+     * 送到 {@link VerityConfigScreenFactory} 生成的中文界面。
+     *
+     * @return 要打开的界面；Verity 未安装或构建失败时返回 {@code null}
+     *         （已在聊天栏给出原因，调用方不要再开空白页）
+     */
+    static Screen openVerityConfig() {
+        Screen chinese = VerityConfigScreenFactory.create(null);
+        if (chinese != null) return chinese;
+
+        Log.warn("无法构建 Verity 中文配置界面（Verity 未安装或版本不匹配）");
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) {
+            mc.player.displayClientMessage(
+                    Component.literal("[VerityPlus] 无法打开配置界面：未检测到 Verity 或版本不匹配。")
+                            .withStyle(ChatFormatting.RED),
+                    false);
+        }
+        return null;
     }
 
     /**
@@ -208,7 +234,7 @@ public class ClientCommands {
                 .append(ModpackHelperBridge.suggestCmd("/vc help", ModpackHelperBridge.CLICK_TO_FILL))
                 .append(Component.literal(" 查看指令列表，或 ").withStyle(ChatFormatting.WHITE))
                 .append(ModpackHelperBridge.suggestCmd("/vc cs", ModpackHelperBridge.CLICK_TO_FILL))
-                .append(Component.literal(" 打开配置界面。").withStyle(ChatFormatting.WHITE));
+                .append(Component.literal(" 打开 Verity 的配置界面（中文）。").withStyle(ChatFormatting.WHITE));
 
         mc.player.displayClientMessage(msg, false);
     }
@@ -218,7 +244,7 @@ public class ClientCommands {
         if (mc.player == null) return;
 
         mc.player.displayClientMessage(Component.literal("==== VerityPlus 指令 ====").withStyle(ChatFormatting.BOLD, ChatFormatting.GOLD), false);
-        say(mc, "/vc cs", "打开配置界面");
+        say(mc, "/vc cs", "打开 Verity 的配置界面（中文）");
         say(mc, "/vc help", "查看此列表");
         // 下面几条的实现都在 Modpack Helper 里，没装时那个子指令压根没注册，
         // 指令列表也就不该把它列出来

@@ -104,6 +104,9 @@ public final class ModpackHelperBridge {
 
     /**
      * 打开「模组管理功能已移除」的说明页。
+     * <p>它原本是首次启动流程的一站（配置界面的「配置模组」按钮、欢迎页）。
+     * 整个流程已经移除，现在<b>没有调用方</b>；入口类留在 Modpack Helper 里，
+     * 重写首次启动流程时可能还会用到，所以桥保留着。
      *
      * @param onFinished 点「跳过」（或按 Esc）之后要做的事
      * @return 是否成功打开

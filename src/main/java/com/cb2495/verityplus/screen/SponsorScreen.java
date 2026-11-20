@@ -33,10 +33,9 @@ public class SponsorScreen extends Screen {
         super.init();
         loadSponsorImage();
 
-        // 退出按钮
-        this.addRenderableWidget(Button.builder(Component.literal("退出"), btn -> {
-            Minecraft.getInstance().setScreen(new VerityPlusScreen());
-        }).pos(this.width / 2 - 50, this.height - 40).size(100, 20).build());
+        // 退出按钮：回到原来的位置，而不是把玩家扔到主界面
+        this.addRenderableWidget(Button.builder(Component.literal("退出"), btn -> this.onClose())
+                .pos(this.width / 2 - 50, this.height - 40).size(100, 20).build());
     }
 
     private void loadSponsorImage() {
@@ -130,8 +129,9 @@ public class SponsorScreen extends Screen {
         return true;
     }
 
+    /** 关闭本页回到游戏；它原来是配置界面的子页面，那个界面已移除。 */
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(new VerityPlusScreen());
+        Minecraft.getInstance().setScreen(null);
     }
 }

@@ -1,11 +1,9 @@
 package com.cb2495.verityplus;
 
-import com.cb2495.verityplus.config.GeneralSettings;
 import com.cb2495.verityplus.config.ModConfig;
 import com.cb2495.verityplus.config.VerityConfigManager;
 import com.cb2495.verityplus.screen.ModsListScreen;
 import com.cb2495.verityplus.screen.RestartPrompt;
-import com.cb2495.verityplus.screen.WelcomeScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
@@ -16,7 +14,6 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
@@ -47,51 +44,39 @@ public class VerityPlus {
             // 用内置模板补齐；已存在的文件不会被覆盖。
             // 必须排在下面的预读之前：预读会立刻读盘，晚了就读到空配置
             VerityConfigManager.copyTemplatesIfMissing();
-            // 后台预读两份配置。界面的 init() 需要同步拿到值来填充控件，
-            // 提前读到内存之后，渲染线程就不必再为读配置碰磁盘。
+            // 后台预读两份配置，后续读写都走内存缓存，渲染线程不再碰磁盘。
             VerityConfigManager.preload();
-            GeneralSettings.preload();
         });
     }
 
     /** 配置自检是否已得到结论：主界面会被反复打开（取消重启、从存档退出等）。 */
     private static final AtomicBoolean TRANSLATE_RESYNC_SETTLED = new AtomicBoolean(false);
 
+    /**
+     * 主界面打开时的配置自检。
+     * <p>这里曾经还负责「没有 API Key 就弹欢迎页」的首次启动流程，
+     * 那套界面已经整块去掉（要重写）。现在入口只剩这一项自检。
+     */
     @SubscribeEvent
     public void onTitleScreenOpen(ScreenEvent.Opening event) {
-        if (event.getScreen() instanceof net.minecraft.client.gui.screens.TitleScreen) {
-            // 简单翻译的 Key 为空、而 Verity 的有：按 Verity 的配置补写，
-            // 补过就要重启才生效。放在欢迎页判断之前，否则首次启动会被欢迎页挡住。
-            // 只有补写过才置位：置位后不再重复处理，未补写则下次进来还能再查
-            if (!TRANSLATE_RESYNC_SETTLED.get()
-                    && VerityConfigManager.resyncTranslateIfKeyMissing()) {
-                TRANSLATE_RESYNC_SETTLED.set(true);
-                Minecraft.getInstance().tell(() -> RestartPrompt.show(
-                        "重启游戏以应用配置",
-                        "翻译模组配置出现错误，现已修复，需要重启以应用修复，是否重启？"));
-                return;
-            }
-            Path configFile = Minecraft.getInstance().gameDirectory.toPath()
-                    .resolve("config/verity-common.toml");
-            boolean needConfig = true;
-            if (Files.exists(configFile)) {
-                try {
-                    String content = Files.readString(configFile);
-                    if (content.contains("apiKey = \"") && !content.contains("apiKey = \"\"")) {
-                        needConfig = false;
-                    }
-                } catch (Exception ignored) {}
-            }
-            if (needConfig) {
-                Minecraft.getInstance().tell(() -> {
-                    Minecraft.getInstance().setScreen(new WelcomeScreen());
-                });
-            }
+        if (!(event.getScreen() instanceof net.minecraft.client.gui.screens.TitleScreen)) return;
+
+        // 简单翻译的 Key 为空、而 Verity 的有：按 Verity 的配置补写，
+        // 补过就要重启才生效。
+        // 只有补写过才置位：置位后不再重复处理，未补写则下次进来还能再查
+        if (!TRANSLATE_RESYNC_SETTLED.get()
+                && VerityConfigManager.resyncTranslateIfKeyMissing()) {
+            TRANSLATE_RESYNC_SETTLED.set(true);
+            Minecraft.getInstance().tell(() -> RestartPrompt.show(
+                    "重启游戏以应用配置",
+                    "翻译模组配置出现错误，现已修复，需要重启以应用修复，是否重启？"));
         }
     }
 
     /**
-     * 扫描 mods 文件夹，提取版本信息并写入 ModsListScreen 的静态字段
+     * 扫描 mods 文件夹，提取版本信息并写入 {@link ModsListScreen} 的静态字段。
+     * <p>目前没有任何界面在显示这些值——旧的欢迎页已移除。
+     * 保留它是为了重写首次启动配置流程时能直接取用（版本号、整合包版本）。
      */
     public static void loadVersions() {
         // modpackVersion 的默认值由 ModsListScreen 的字段初始化给出
@@ -110,7 +95,7 @@ public class VerityPlus {
         for (File file : files) {
             String name = file.getName();
             // 现在发布的文件名是 [VerityPlus]…；旧的 [Verity拓展增强]… 也一并认，
-            // 否则用旧版文件名升级上来的玩家会在欢迎页看到「配置工具版本: 未知」
+            // 否则用旧版文件名升级上来的玩家会看到「配置工具版本: 未知」
             if (name.startsWith("[VerityPlus]") || name.startsWith("[Verity拓展增强]")) {
                 ModsListScreen.configModVersion = extractVersion(name);
             } else if (name.startsWith("[Verity]")) {

@@ -18,24 +18,22 @@ Verity JE 本体把 AI、语音、本地模型等设置放在一个由 Yet Anoth
 
 ### 1. 配置界面中文化
 
-用同一套 YACL API 重建了一个中文配置界面，覆盖提供商、API Key、Base URL、模型、
-
-语音朗读、深度思考等全部选项。
+用同一套 YACL API 重建了一个中文配置界面，覆盖提供商、API Key、Base URL、模型、语音朗读、深度思考等全部选项。文字虽是重写的，选项与取值范围仍全部来自 Verity 自己的 `ForgeConfigSpec`，所以不会和本体走岔。
 
 ### 2. 聊天与界面文本中文化
 
 拦截 Verity 发到聊天栏的固定文案，命中词表就换成中文；同时处理断线界面、
-
 本地 AI（Ollama）安装页、进度 HUD 等处的英文。
 
-### 3. 补齐 Verity 缺失的周边功能
+### 3. 用中文重建 Verity 的配置界面
 
-首次启动引导、旧存档导入、高级设置（`dayCount` / `canCrash` 等）、
+读 Verity 自己的 `ForgeConfigSpec`，用 YACL 重建一套中文界面，
+挂在「§Mods → Verity → Config」上。**本模组不再自带配置界面**——
+Verity 原生的配置界面已经覆盖了同样的选项，再维护一套只会两处走岔。
 
-记忆文件修复、赞助码等。
+此外还有记忆文件修复、赞助码等周边功能。
 
 > **注意**：AI 生成的回复正文（`<Verity>` 后面那句）不在翻译范围内，
-
 > 那是模型输出，不属于模组的固定文案。
 
 ---
@@ -65,7 +63,7 @@ Verity JE 本体把 AI、语音、本地模型等设置放在一个由 Yet Anoth
 | 指令 | 作用 |
 |---|---|
 | `/vc` | 提示常用指令 |
-| `/vc cs` | 打开 Verity AI 配置界面 |
+| `/vc cs` | 打开 Verity 的配置界面（中文） |
 | `/vc configscreen` | 同上 |
 | `/vc exitgame` | 直接退出游戏（部分启动器下按钮不生效时的备用） |
 | `/vc verity mfix` | 修复 Verity 的聊天记忆（移除空 AI 消息） |
@@ -82,7 +80,8 @@ Verity JE 本体把 AI、语音、本地模型等设置放在一个由 Yet Anoth
 | `/vc dshint date` | 按当前时间查询一次峰谷提示 |
 | `/vc dshint date <日期> <时间>` | 查询指定时刻，格式 `YYYY-MM-DD mm.ss` |
 
-**按键**：反斜杠 `\` 打开配置界面（可在「按键设置」里改）。
+**按键**：反斜杠 `\` 打开 Verity 的配置界面（中文），可在「按键设置」里改。
+与 `/vc cs` 是同一个界面。
 
 ---
 
@@ -122,22 +121,18 @@ src/main/java/com/cb2495/verityplus/
 │   ├── OllamaHudTranslator.java       下载进度 HUD 中文
 │   ├── DisconnectScreenTranslator.java 被踢出游戏时的 Farewell 文本
 │   ├── ModpackHelperBridge.java       反射调用 Modpack Helper（可选依赖）
-│   └── KeyBindings.java               \ 键打开配置
-├── config/                            配置读写（7 个类）
+│   └── KeyBindings.java               \ 键打开 Verity 配置界面
+├── config/                            配置读写（6 个类）
 │   ├── VerityConfigManager.java       读写 verity-common.toml
 │   ├── ModConfig.java                 本模组自己的开关
-│   ├── Providers.java                 AI 提供商与模型清单
-│   └── GeneralSettings.java           高级设置的字段
-├── screen/                            本模组自己的界面（7 个类）
-│   ├── VerityPlusScreen.java          主配置界面
-│   ├── AdvancedSettingsScreen.java    高级设置
-│   ├── WelcomeScreen.java             首次启动欢迎页
+│   └── Providers.java                 AI 提供商与模型清单（暂无界面使用，见下）
+├── screen/                            剩下的几个独立界面（4 个类）
 │   ├── SponsorScreen.java             赞助页
 │   ├── RestartPrompt.java             重启确认
 │   ├── OpenUrlScreen.java             缺少 Modpack Helper 时的提示页
-│   └── ModsListScreen.java            只保留按平台自动启停，不再画界面
+│   └── ModsListScreen.java            只剩版本号字段，不画界面
 ├── util/                              日志、后台线程、图片头解析等工具
-└── widget/                            下拉框、滑块、勾选框、滚动区域
+└── widget/                            通用的下拉框控件
 
 src/main/resources/
 ├── assets/verity/lang/zh_cn.json      覆盖 Verity 的内置语言文件
@@ -145,6 +140,15 @@ src/main/resources/
 ├── data/verity/advancements/          进度（成就）的中文覆盖
 └── META-INF/mods.toml                 模组元数据
 ```
+
+### 关于 `Providers`
+
+`config/Providers.java` 是一张「提供商 → 端点 / API 格式 / Key 申请页 / 模型清单」
+的表。**目前没有任何界面在用它**——旧的自带 AI 配置界面已经移除。
+保留它是为了重写首次启动配置流程时直接复用：
+用户选一个提供商，就自动填上 Base URL 与可选模型。
+
+`widget/DropdownWidget` 同理：它是通用的下拉框控件，暂时没有调用方。
 
 ---
 
@@ -258,7 +262,11 @@ gradlew.bat :modpackhelper:runClient
 - 只装 VerityPlus 时 `/vc help`、`/vc qanda`、`/vc dshint` 不存在，
   这不是 bug
 
-- Android 端不支持输入法冲突修复，首次启动会按平台自动禁用
+- 本模组**没有自己的配置界面**，`/vc cs`、`/vc configscreen` 和 `\` 键打开的
+  都是 Verity 自己的配置界面（中文）。要改 AI 设置请到那里，不要找「VerityPlus 的设置」
+
+- 首次启动不会再弹任何引导页。之前那套流程（欢迎页 → 旧存档导入 → 配置界面）
+  已整块移除，正在重写
 
 ---
 

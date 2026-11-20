@@ -7,9 +7,9 @@ import net.minecraft.network.chat.Component;
 
 /**
  * 「是否需要重启游戏」确认框。
- * <p>这段代码原先在 {@code VerityPlusScreen}、模组列表和教程提醒界面里各写了一份，
- * 内容完全一致；后两个界面已随模组管理功能一起移除。
- * <p>默认文案用于「配置已保存」，启动时的配置自检修复、首次启动收尾则用
+ * <p>这段代码原先在若干个界面里各写了一份，内容完全一致；那些界面大多已随
+ * 配置界面一起移除。现在它只剩一个调用方：主界面打开时的翻译配置自检。
+ * <p>默认文案用于「配置已保存」，启动时的配置自检修复用
  * {@link #show(String, String)} 传入自己的说明。
  */
 public final class RestartPrompt {
