@@ -8,7 +8,7 @@ version = "${mod_version}"
 displayName = "${mod_name}"
 authors = "${mod_authors}"
 description = '''${mod_description}'''
-logoFile = "pack.png"
+logoFile = "icon.png"
 
 # YACL 是 Verity 配置界面的渲染库，本模组用同一套 API 搭中文界面。
 # 装了 Verity 的玩家一定有它；这里声明出来只是为了让缺失时给出明确提示，
