@@ -1,5 +1,6 @@
 package com.cb2495.verityplus;
 
+import com.cb2495.verityplus.config.GameState;
 import com.cb2495.verityplus.config.ModConfig;
 import com.cb2495.verityplus.config.VerityConfigManager;
 import com.cb2495.verityplus.screen.ModsListScreen;
@@ -46,6 +47,9 @@ public class VerityPlus {
             VerityConfigManager.copyTemplatesIfMissing();
             // 后台预读两份配置，后续读写都走内存缓存，渲染线程不再碰磁盘。
             VerityConfigManager.preload();
+            // 引导状态：文件不存在就创建（= 首次启动），并把启动次数加一。
+            // 由 FirstRunGate 在打开主界面时读取，所以必须排在那之前。
+            GameState.loadOrCreate();
         });
     }
 
