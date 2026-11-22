@@ -110,7 +110,8 @@ Verity 原生的配置界面已经覆盖了同样的选项，再维护一套只�
 ```
 src/main/java/com/cb2495/verityplus/
 ├── VerityPlus.java                    模组入口，版本扫描，标题界面事件
-├── client/                            客户端行为（19 个类）
+├── client/                            客户端行为（20 个类）
+│   ├── FirstRunGate.java              决定何时弹引导（等开场动画播完）
 │   ├── ChatFilter.java                聊天消息入口，只做翻译链路
 │   ├── ChatTranslator.java            中英词表与匹配逻辑（纯字典，不改游戏类）
 │   ├── ErrorChatHandler.java          解析 "ERROR: {json}" 并给出中文说明
@@ -122,11 +123,14 @@ src/main/java/com/cb2495/verityplus/
 │   ├── DisconnectScreenTranslator.java 被踢出游戏时的 Farewell 文本
 │   ├── ModpackHelperBridge.java       反射调用 Modpack Helper（可选依赖）
 │   └── KeyBindings.java               \ 键打开 Verity 配置界面
-├── config/                            配置读写（6 个类）
+├── config/                            配置读写（7 个类）
 │   ├── VerityConfigManager.java       读写 verity-common.toml
 │   ├── ModConfig.java                 本模组自己的开关
+│   ├── GameState.java                 引导状态（.cache/verity_plus/game_state）
 │   └── Providers.java                 AI 提供商与模型清单（暂无界面使用，见下）
-├── screen/                            剩下的几个独立界面（4 个类）
+├── screen/                            独立界面（6 个类）
+│   ├── GuideScreen.java               引导教程（欢迎页 + 5 步 + 结束页）
+│   ├── ResumePrompt.java              「上次配置未完成」确认框
 │   ├── SponsorScreen.java             赞助页
 │   ├── RestartPrompt.java             重启确认
 │   ├── OpenUrlScreen.java             缺少 Modpack Helper 时的提示页
@@ -265,8 +269,13 @@ gradlew.bat :modpackhelper:runClient
 - 本模组**没有自己的配置界面**，`/vc cs`、`/vc configscreen` 和 `\` 键打开的
   都是 Verity 自己的配置界面（中文）。要改 AI 设置请到那里，不要找「VerityPlus 的设置」
 
-- 首次启动不会再弹任何引导页。之前那套流程（欢迎页 → 旧存档导入 → 配置界面）
-  已整块移除，正在重写
+- 首次启动会弹引导（欢迎页 → 第 1~5 步 → 结束页）。若 Verity 的开场动画开着，
+  会等它播完再弹，不会把动画顶掉
+
+- 引导进度记在 `.cache/verity_plus/game_state`。中途关游戏，下次启动会问
+  「是否继续」；想重置引导，删掉这个文件即可
+
+- 引导里目前只有 5 个占位步骤，还没接入真实的配置项
 
 ---
 

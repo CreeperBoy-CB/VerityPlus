@@ -1,5 +1,6 @@
 package com.cb2495.verityplus.client;
 
+import com.cb2495.verityplus.screen.GuideScreen;
 import com.cb2495.verityplus.util.Log;
 
 import dev.isxander.yacl3.api.ButtonOption;
@@ -199,6 +200,24 @@ public final class VerityConfigScreenFactory {
             enumOption(category, "AI_MODEL_PRESET", null);
         }
         tickBox(category, "AI_THINK");
+
+        // 引导配置：重新走一遍引导流程。放在最后一行，
+        // 因为它是本模组提供的入口，不是 Verity 自己的选项。
+        category.option(ButtonOption.createBuilder()
+                .name(Component.literal("配置引导"))
+                .text(Component.literal("打开"))
+                .description(OptionDescription.of(Component.literal(
+                        "重新走一遍首次启动的配置引导。\n"
+                                + "适合忘了 API Key 在哪填、或想换个服务商时从零过一遍。\n"
+                                + "做完后回到本界面。")))
+                // 回到这里时重建一个新的配置界面：旧的 YACL 实例在关闭时
+                // 已释放内部状态，复用只会得到空白页
+                .action((screen, option) -> GuideScreen.openFrom(screen, () -> {
+                    Screen rebuilt = create(null);
+                    Minecraft.getInstance().setScreen(rebuilt);
+                }))
+                .build());
+
         return category.build();
     }
 
