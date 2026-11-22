@@ -243,8 +243,8 @@ public final class Providers {
                 OPENAI, "https://openrouter.ai/api/v1", null));
         list.add(new PickerOption("Mistral", "多语言表现佳，有免费额度，国内无法正常访问",
                 OPENAI, "https://api.mistral.ai/v1", null));
-        list.add(new PickerOption(CUSTOM_LABEL, "",
-                OPENAI, null, null));
+        list.add(new PickerOption(CUSTOM_LABEL,
+                "接入你自己使用的 AI API，仅限 OpenAI 接口", OPENAI, null, null));
         return list;
     }
 

@@ -16,6 +16,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.fml.ModList;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -435,6 +436,14 @@ public class GuideScreen extends Screen {
                         showProviderHint("请先选择一个提供商", COLOR_WARN);
                         return;
                     }
+                    // 自定义网址校验没通过（红）或还在验证（黄）时不许往下走。
+                    // 按住 Ctrl 可以强行通过：玩家可能就是想先配完再回来改。
+                    if (endpointCheckBlocksNext() && !forceNextHeld()) {
+                        showProviderHint(endpointCheckBlockedHint(), COLOR_WARN);
+                        return;
+                    }
+                    // Ctrl 强制通过时，地址还没验证过；仍然把填的内容写进配置，
+                    // 否则玩家强过一步反而丢了刚输入的地址
                     if (!commitProviderChoice()) return;
                 }
                 if (step >= GameState.STEPS) {
@@ -459,29 +468,53 @@ public class GuideScreen extends Screen {
     /** 第 1 步的标题。 */
     private static final String PROVIDER_QUESTION = "首先，请选择 Verity AI 大脑的提供商";
 
-    /** 第 1 步左侧列表与右侧介绍面板的宽度。 */
-    private static final int PICKER_LIST_WIDTH = 170;
-    private static final int PICKER_PANEL_WIDTH = 200;
-    /** 列表与右侧面板之间的间隙。 */
-    private static final int PICKER_COLUMN_GAP = 10;
-    /** 列表一行的行高。 */
-    private static final int PICKER_ROW_HEIGHT = 18;
-    /** 列表左右内边距。 */
+    /**
+     * 列表左右两侧与屏幕边缘的留白。
+     * <p>置 0：表格横跨整个屏幕宽度，只留 1px 给边框不掉出屏幕。
+     */
+    private static final int PICKER_SIDE_MARGIN = 1;
+    /** 左列（提供商名）占的宽度，右列从这条竖线之后开始。 */
+    private static final int PICKER_NAME_WIDTH = 90;
+    /** 表头高度。 */
+    private static final int PICKER_HEADER_HEIGHT = 14;
+    /** 一项（一个「块」）的内容行高，不含块与块之间的空隙。 */
+    private static final int PICKER_ROW_HEIGHT = 16;
+    /** 块与块之间的空隙：每项独立成框，靠空隙拉开距离。 */
+    private static final int PICKER_ROW_GAP = 3;
+    /** 左列文字距左边缘的内边距。 */
     private static final int PICKER_TEXT_INSET = 4;
-    /** 列表可视高度（不含滚动条与边框）。 */
-    private static final int PICKER_LIST_VISIBLE = PICKER_ROW_HEIGHT * 9;
-    /** 列表滚动条宽度。 */
-    private static final int PICKER_SCROLL_WIDTH = 3;
+    /** 滚动条宽度。 */
+    private static final int PICKER_SCROLL_WIDTH = 4;
+
+    /** 一项占的总高度：内容 + 下方空隙。 */
+    private static final int PICKER_ITEM_HEIGHT = PICKER_ROW_HEIGHT + PICKER_ROW_GAP;
 
     /** 提示文字的颜色：正常（中性）、警告（红）、成功（绿）。 */
     private static final int COLOR_NEUTRAL = 0xFFAAAAAA;
     private static final int COLOR_WARN = 0xFFFF5555;
     private static final int COLOR_OK = 0xFF55FF55;
 
-    /** 列表底色与边框。 */
+    /** 表格底色、边框与项底色。 */
     private static final int COLOR_LIST_BG = 0xC0000000;
-    private static final int COLOR_LIST_BORDER = 0xFF555555;
+    private static final int COLOR_LIST_BORDER = 0xFFAAAAAA;
+    private static final int COLOR_ITEM_BG = 0xFF1E1E1E;
+    private static final int COLOR_ITEM_BORDER = 0xFF777777;
     private static final int COLOR_ROW_SELECTED = 0xFF4CAF50;
+
+    // ---------- 自定义网址校验的配色 ----------
+    /** 通过：绿。 */
+    private static final int COLOR_CHECK_OK = 0xFF55FF55;
+    /** 格式错 / 404 / 403：红。 */
+    private static final int COLOR_CHECK_ERROR = 0xFFFF5555;
+    /** 只是提醒：橙。 */
+    private static final int COLOR_CHECK_WARN = 0xFFFFAA00;
+    /** 正在验证：黄。 */
+    private static final int COLOR_CHECK_PENDING = 0xFFFFFF55;
+    /** 「重新尝试」链接：淡蓝。 */
+    private static final int COLOR_RETRY_LINK = 0xFF55CCFF;
+
+    /** 校验图标与后面文字的间隙。图标宽度由字体实测，不再写死。 */
+    private static final int CHECK_ICON_GAP = 3;
 
     /** 「自定义」的 Endpoint 输入框，渲染与按键判断都要用。 */
     private EditBox endpointBox;
@@ -508,6 +541,145 @@ public class GuideScreen extends Screen {
         return Providers.CUSTOM_LABEL.equals(pickedProvider);
     }
 
+    // ---------- 自定义 Endpoint 的校验状态 ----------
+
+    /**
+     * 校验结论的图标。
+     * <p>直接用字体里现成的符号（{@code √ × ●}），不手画像素。
+     * 这三个字符都在原版中文字体里，渲染出来清晰且大小自动跟随字号。
+     */
+    private enum Mark {
+        /** 绿钩。 */
+        CHECK("√"),
+        /** 红叉。 */
+        CROSS("×"),
+        /** 橙点。 */
+        DOT_WARN("●"),
+        /** 黄点。 */
+        DOT_PENDING("●");
+
+        /** 显示的符号。 */
+        private final String symbol;
+
+        Mark(String symbol) {
+            this.symbol = symbol;
+        }
+
+        String symbol() {
+            return symbol;
+        }
+    }
+
+    /** 校验当前状态；{@code null} 表示还没开始检查（或不需要检查）。 */
+    private EndpointValidator.Result endpointCheck = null;
+
+    /** 上一次输入的时间戳，用于「停止输入 2 秒后再探活」的防抖。 */
+    private long lastEndpointEditMs = 0L;
+
+    /** 到点要发起的探活时间戳；{@code <= 0} 表示当前没有排队的探活。 */
+    private long pendingProbeAt = 0L;
+    /** 排队那次探活的代号，用于丢弃过期结果。 */
+    private int pendingProbeGeneration = -1;
+    /** 排队那次探活要查的地址。 */
+    private String pendingProbeEndpoint = "";
+
+    /**
+     * 结论里「[点击此处]重新尝试」的可点区域，渲染时更新、点击时读取。
+     */
+    private int retryLinkLeft = 0;
+    private int retryLinkRight = 0;
+    private int retryLinkTop = 0;
+    private int retryLinkBottom = 0;
+
+    /**
+     * 重新安排一次校验。
+     * <p>先做格式判断（瞬时），格式对了才进入「等输入停止 → 后台探活」的流程。
+     * <p>每次调用都会作废在途请求，避免先发的慢请求盖掉新结果。
+     */
+    private void scheduleEndpointCheck() {
+        lastEndpointEditMs = System.currentTimeMillis();
+        // 作废在途请求：序号一变，旧结果回来时会被丢掉
+        int generation = EndpointValidator.invalidate();
+
+        String text = endpointBox != null ? endpointBox.getValue().trim() : customEndpoint.trim();
+        EndpointValidator.Result formatProblem = EndpointValidator.checkFormat(text);
+        if (formatProblem != null) {
+            // 格式就不对，不必发请求
+            endpointCheck = formatProblem;
+            return;
+        }
+        if (text.isEmpty()) {
+            // 空地址：不报错也不探活
+            endpointCheck = null;
+            return;
+        }
+        // 格式没问题：先挂上「正在验证」，等 2 秒后再真正发请求
+        endpointCheck = new EndpointValidator.Result(
+                EndpointValidator.Level.PENDING, "正在验证网址……", false);
+        pendingProbeAt = lastEndpointEditMs + EndpointValidator.DEBOUNCE_MS;
+        pendingProbeGeneration = generation;
+        pendingProbeEndpoint = text;
+    }
+
+    /**
+     * 防抖到点后发起后台探活。
+     * <p>放在 {@code tick()} 里而不是用定时器线程：界面关闭后不该再发请求，
+     * 挂在界面的 tick 上天然具备这个生命周期。
+     */
+    private void tickEndpointCheck() {
+        if (pendingProbeAt <= 0L) return;
+        if (System.currentTimeMillis() < pendingProbeAt) return;
+
+        int gen = pendingProbeGeneration;
+        String endpoint = pendingProbeEndpoint;
+        pendingProbeAt = 0L;
+        pendingProbeGeneration = -1;
+        pendingProbeEndpoint = "";
+
+        // 期间又输入过：这次探活已经作废
+        if (gen != EndpointValidator.currentGeneration()) return;
+
+        EndpointValidator.probeAsync(endpoint, gen, result -> endpointCheck = result);
+    }
+
+    /** 立刻重试（点「[点击此处]重新尝试」）。 */
+    private void retryEndpointCheck() {
+        scheduleEndpointCheck();
+        // 跳过 2 秒防抖：玩家已经明确要求重试，不该再等
+        pendingProbeAt = System.currentTimeMillis();
+    }
+
+    /**
+     * 当前状态是否禁止「下一步」。
+     * <p>只有红（格式错 / 404 / 403）与黄（正在验证）拦人，由
+     * {@link EndpointValidator.Result#blocksNext()} 判定。
+     */
+    private boolean endpointCheckBlocksNext() {
+        return customMode() && endpointCheck != null && endpointCheck.blocksNext();
+    }
+
+    /** 被拦下时给出的说明，告诉玩家还有 Ctrl 这条后路。 */
+    private String endpointCheckBlockedHint() {
+        return "网址未通过验证，无法继续（按住 Ctrl 点击「确认」可强制通过）";
+    }
+
+    /**
+     * 「确认」这一次点击是否按住了 Ctrl。
+     * <p>从窗口当前的修饰键状态读，而不是靠事件参数：按钮回调拿不到它。
+     */
+    private boolean forceNextHeld() {
+        long handle = Minecraft.getInstance().getWindow().getWindow();
+        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
+                || GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+    }
+
+    /** 点击是否落在「[点击此处]重新尝试」上。 */
+    private boolean retryLinkClicked(double mouseX, double mouseY) {
+        return retryLinkRight > retryLinkLeft
+                && mouseX >= retryLinkLeft && mouseX < retryLinkRight
+                && mouseY >= retryLinkTop && mouseY < retryLinkBottom;
+    }
+
     /** 已经选好了提供商（「（请选择）」不算）。 */
     private boolean providerChosen() {
         return pickedProvider != null && !Providers.PICKER_PLACEHOLDER.equals(pickedProvider);
@@ -515,22 +687,27 @@ public class GuideScreen extends Screen {
 
     /**
      * 第 1 步的控件布局。
-     * <p>列表与右侧面板都是自绘的（见 {@link #renderProviderStep}），
-     * 这里只放真正需要事件系统的控件：自定义输入框、「确认」。
-     * <p>原来那个下拉框不再使用：整屏只填一个 240px 宽的下拉框太空，
-     * 换来的是中间一整块两列的滚动列表 + 介绍面板。
+     * <p>表格是自绘的（见 {@link #renderProviderList}），这里只放真正需要
+     * 事件系统的控件：自定义模式的 Endpoint 输入框、「确认」。
+     * <p>原来那个 240px 宽的下拉框铺不满屏幕，换成了一整块两列的滚动表格。
      */
     private void initProviderPicker(int buttonY) {
         int centerX = this.width / 2;
 
-        // 自定义模式的输入框：占满右侧面板。
-        // 往里缩 4px，否则它自带的边框会压在面板边框上，看起来像外框套内框。
+        // 自定义模式：输入框<b>盖住「自定义」那一项的介绍文字</b>，
+        // 位置和长度都与右列完全一致，看起来像那一行的介绍变成了输入框
         if (customMode()) {
-            EditBox box = new EditBox(this.font, pickerPanelLeft() + 4, pickerPanelTop() + 4,
-                    PICKER_PANEL_WIDTH - 8, PICKER_ROW_HEIGHT, Component.literal("AI Endpoint"));
+            // 左缘给 descX：保持 bordered 为 true，文字自带 4px 内边距，
+            // 所以控件左缘比文字起点再左 4px，正好与其它行的介绍对齐
+            int boxLeft = pickerDescX() - 4;
+            int boxRight = pickerRowRight() - 1;
+            int boxWidth = Math.max(40, boxRight - boxLeft);
+            // 自带边框换成绿色的变体：原版的白框压在绿色选中框里会像「框中框」
+            EditBox box = new GreenBorderedEditBox(this.font, boxLeft, customBoxY(), boxWidth,
+                    PICKER_ROW_HEIGHT, Component.literal("AI Endpoint"));
             box.setMaxLength(512);
             box.setValue(customEndpoint);
-            box.setHint(Component.literal("键入 API 提供商文档内的 OpenAI BaseURL……")
+            box.setHint(Component.literal("请填入 AI 提供商文档中的AI Endpoint")
                     .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
             box.setResponder(this::onCustomEndpointEdited);
             this.endpointBox = box;
@@ -543,6 +720,21 @@ public class GuideScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("确认"), btn -> next())
                 .pos(centerX - BUTTON_WIDTH / 2, buttonY)
                 .size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+    }
+
+    /**
+     * 自定义模式下输入框的 Y：与「自定义」那一项的介绍文字同高。
+     * <p>输入框把这行介绍覆盖掉，所以它的 Y 就是那一项的内容行起点。
+     * <p>滚动时「自定义」可能被滚出可视区，那时把 Y 夹到表格内，
+     * 免得输入框跑到表格外面的标题或按钮上——它是个真控件，
+     * 藏起来会变成一个看不见却还能聚焦的幽灵。
+     */
+    private int customBoxY() {
+        int rows = pickerItems().size();
+        int rowTop = pickerRowsTop() + (rows - 1) * PICKER_ITEM_HEIGHT - pickerScroll;
+        int minY = pickerRowsTop();
+        int maxY = pickerListBottom() - 1 - PICKER_ROW_HEIGHT;
+        return Math.max(minY, Math.min(maxY, rowTop));
     }
 
     /**
@@ -563,63 +755,112 @@ public class GuideScreen extends Screen {
         return titleRowY() + this.font.lineHeight + 24;
     }
 
-    /** 列表整体的左边缘：两列（列表 + 面板）合起来在屏幕上水平居中。 */
-    private int pickerBlockLeft() {
-        int total = PICKER_LIST_WIDTH + PICKER_COLUMN_GAP + PICKER_PANEL_WIDTH;
-        return (this.width - total) / 2;
+    /** 表格左边缘：左右各留 {@link #PICKER_SIDE_MARGIN}，铺满大半个屏幕。 */
+    private int pickerLeft() {
+        return PICKER_SIDE_MARGIN;
     }
 
-    /** 列表左边缘。 */
-    private int pickerListLeft() {
-        return pickerBlockLeft();
+    /** 表格右边缘。 */
+    private int pickerRight() {
+        return this.width - PICKER_SIDE_MARGIN;
     }
 
-    /** 右侧面板的左边缘。 */
-    private int pickerPanelLeft() {
-        return pickerBlockLeft() + PICKER_LIST_WIDTH + PICKER_COLUMN_GAP;
+    /** 左列文字的起点（也是整行的左内边距）。 */
+    private int pickerNameX() {
+        return pickerLeft() + PICKER_TEXT_INSET;
+    }
+
+    /** 右列文字的起点：左列宽度之后。 */
+    private int pickerDescX() {
+        return pickerLeft() + PICKER_TEXT_INSET + PICKER_NAME_WIDTH;
+    }
+
+    /** 表格内容区（不含滚动条）的右边界。 */
+    private int pickerRowRight() {
+        return pickerRight() - PICKER_SCROLL_WIDTH - 1;
+    }
+
+    /** 表格顶端。 */
+    private int pickerTop() {
+        return providerQuestionY() + this.font.lineHeight + 12;
     }
 
     /**
-     * 列表与面板共用的顶端。
-     * <p>整块（问题行 → 两列列表 → Ollama 链接 → 提示行）在「问题行 ~ 按钮上方」
-     * 这段空白里垂直居中。原来贴着问题行往下排，1280×720 下按钮上方会空出
-     * 四百多像素，整页头重脚轻。
+     * 表格可视高度。
+     * <p>铺满「表头下方 ~ 按钮上方」之间的空间：这一页只有这一块内容，
+     * 固定高度会在底部留一大片空白。
+     * <p>块数取整后把不足一块的余数也算进来，否则表格底边会比可用空间
+     * 短一截、露出一条背景色。滚动与命中判定用的都是「整块」，
+     * 这里多出来的零点几块只会表现为最后一项下方的一小段空白。
+     * <p>自定义模式的输入框是<b>盖在</b>「自定义」那一项上的，不额外占高度。
      */
-    private int pickerPanelTop() {
-        // 从问题行下方到提示行底部，整块的净高
-        int blockHeight = 12 + (PICKER_LIST_VISIBLE + 2)
-                + 10 + this.font.lineHeight
-                + 6 + this.font.lineHeight;
-
-        int top = providerQuestionY() + this.font.lineHeight;              // 可排区顶端
-        int bottom = this.height - BUTTON_BOTTOM_MARGIN - BUTTON_HEIGHT - 12; // 可排区底端
-        int spare = Math.max(0, bottom - top - blockHeight);
-        return top + spare / 2;
+    private int pickerVisibleHeight() {
+        int available = pickerBottomMax() - pickerRowsTop();
+        // 至少容得下 3 块；正常窗口下 available 远大于此
+        return Math.max(3 * PICKER_ITEM_HEIGHT, available);
     }
 
-    /** 列表底端（含边框）。 */
+    /**
+     * 表格可用的底端。
+     * <p>表格一直铺到「确认」按钮上方，中间只留出 Ollama 链接那一行：
+     * 链接已经挪到按钮正上方，提示行在按钮下方，表格下方不再需要预留。
+     * <p>多留 4px 是给链接的悬停提示与表格底边框之间的呼吸，
+     * 不留的话表格最后一行的边框会与链接文字贴死。
+     */
+    private int pickerBottomMax() {
+        // 下方只有：Ollama 链接一行 + 它到按钮之间的一点空隙
+        int below = this.font.lineHeight + 8 + 4;
+        return this.height - BUTTON_BOTTOM_MARGIN - below;
+    }
+
+    /** 表头下沿：各块从这里开始排。 */
+    private int pickerRowsTop() {
+        return pickerTop() + PICKER_HEADER_HEIGHT;
+    }
+
+    /** 表格底端（含边框）。 */
     private int pickerListBottom() {
-        return pickerPanelTop() + PICKER_LIST_VISIBLE + 2;
+        return pickerRowsTop() + pickerVisibleHeight();
     }
 
-    /** 列表内可滚动的最大偏移。 */
+    /** 表格内可滚动的最大偏移。 */
     private int pickerMaxScroll() {
-        int content = pickerItems().size() * PICKER_ROW_HEIGHT;
-        return Math.max(0, content - PICKER_LIST_VISIBLE);
+        int content = pickerItems().size() * PICKER_ITEM_HEIGHT;
+        return Math.max(0, content - pickerVisibleHeight());
     }
 
-    /** 选中了一项：只记下来，右侧面板随之刷新。 */
+    /** 选中了一项：只记下来，右侧列随之刷新。 */
     private void onProviderPicked(String label) {
         pickedProvider = label;
         showProviderHint("", COLOR_NEUTRAL);
-        // 自定义与其他项的右侧内容不一样（输入框 ↔ 说明），要重建控件
-        this.rebuildWidgets();
+        // 立即重建控件，让「自定义」的输入框当场出现/消失。
+        // 不能用 Screen.rebuildWidgets()：反编译 1.20.1 看，它只是排了一次
+        // 无障碍朗读（见 m_169380_），并不会真的重建控件；真正重建由 resize() 触发。
+        // 所以这里自己 clearWidgets() + init()。
+        // clearWidgets() 不会重置 focused，切走时要先手动清掉，
+        // 否则 focused 会一直指着一个已经不在控件表里的对象。
+        this.setFocused(null);
+        this.clearWidgets();
+        this.init();
+        // 选中「自定义」后把焦点交给新输入框，玩家不必再点一次就能直接打字
+        if (customMode() && endpointBox != null) {
+            this.setFocused(endpointBox);
+            // 进来时先把已有内容校验一遍：玩家可能是改完又切回来的
+            scheduleEndpointCheck();
+        } else {
+            // 切走了：清掉校验状态，别让红字留在界面上
+            endpointCheck = null;
+            pendingProbeAt = 0L;
+            resetRetryLink();
+        }
     }
 
     /** 玩家改了自定义 Endpoint。 */
     private void onCustomEndpointEdited(String text) {
         customEndpoint = text;
         showProviderHint("", COLOR_NEUTRAL);
+        // 每敲一个字都重来一遍校验：作废在途请求、重新计时
+        scheduleEndpointCheck();
     }
 
     /** 换一条提示；传空串表示清掉提示。 */
@@ -673,7 +914,7 @@ public class GuideScreen extends Screen {
 
     // ---------- 第 1 步的绘制 ----------
 
-    /** 画第 1 步：问题、两列列表、右侧介绍/输入框、底部 Ollama 链接、提示行。 */
+    /** 画第 1 步：问题、铺满的表格、底部 Ollama 链接、提示行。 */
     private void renderProviderStep(GuiGraphics graphics, int mouseX, int mouseY) {
         int centerX = this.width / 2;
 
@@ -681,8 +922,12 @@ public class GuideScreen extends Screen {
                 centerX, providerQuestionY(), COLOR_BODY);
 
         renderProviderList(graphics, mouseX, mouseY);
-        renderProviderPanel(graphics);
         renderOllamaLink(graphics, mouseX, mouseY);
+
+        // 自定义模式下，把校验结论显示在输入框下方（也就是表格底部再往下一点）
+        if (customMode()) {
+            renderEndpointCheck(graphics, mouseX, mouseY);
+        }
 
         if (!providerHint.isEmpty()) {
             graphics.drawCenteredString(this.font, Component.literal(providerHint),
@@ -690,30 +935,127 @@ public class GuideScreen extends Screen {
         }
     }
 
-    /** 左列：可滚动的提供商列表。 */
-    private void renderProviderList(GuiGraphics graphics, int mouseX, int mouseY) {
-        int left = pickerListLeft();
-        int top = pickerPanelTop();
-        int right = left + PICKER_LIST_WIDTH;
-        int bottom = pickerListBottom();
+    /** 校验结论那一行（图标 + 文字 + 可选的重试链接）。 */
+    private void renderEndpointCheck(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (endpointCheck == null) {
+            resetRetryLink();
+            return;
+        }
 
+        // 显示在「自定义」那一项的正下方，而不是屏幕底部的提示行：
+        // 玩家刚填完地址，视线就在那一行上，报错紧跟其后最容易被看到
+        int y = endpointCheckY();
+        int textX = drawCheckMark(graphics, pickerLeft(), y);
+
+        int color = checkColor(endpointCheck);
+        graphics.drawString(this.font, endpointCheck.message(), textX, y, color, false);
+
+        // 需要重试时在文字后面追加淡蓝色的「[点击此处]重新尝试」
+        if (endpointCheck.retryable()) {
+            int afterText = textX + this.font.width(endpointCheck.message());
+            String link = " [点击此处]重新尝试";
+            graphics.drawString(this.font, link, afterText, y, COLOR_RETRY_LINK, false);
+            this.retryLinkLeft = afterText + this.font.width(" ");
+            this.retryLinkRight = afterText + this.font.width(link);
+            this.retryLinkTop = y;
+            this.retryLinkBottom = y + this.font.lineHeight;
+        } else {
+            resetRetryLink();
+        }
+    }
+
+    /**
+     * 校验结论那一行的 Y：紧贴在「自定义」那一项的正下方。
+     * <p>「自定义」是列表最后一项，按当前滚动位置反推它的底边即可。
+     * <p>表格已经铺到接近按钮，所以结论行可能落在表格外面——
+     * 这是有意的：表格内每行都有文字，塞进去反而会挤。
+     */
+    private int endpointCheckY() {
+        int rows = pickerItems().size();
+        int rowTop = pickerRowsTop() + (rows - 1) * PICKER_ITEM_HEIGHT - pickerScroll;
+        return rowTop + PICKER_ROW_HEIGHT + 4;
+    }
+
+    /** 把重试链接的区域清空，避免上一帧的坐标残留导致误点。 */
+    private void resetRetryLink() {
+        retryLinkLeft = 0;
+        retryLinkRight = 0;
+        retryLinkTop = 0;
+        retryLinkBottom = 0;
+    }
+
+    /** 结论对应的颜色。 */
+    private static int checkColor(EndpointValidator.Result result) {
+        return switch (result.level()) {
+            case OK -> COLOR_CHECK_OK;
+            case ERROR -> COLOR_CHECK_ERROR;
+            case WARN -> COLOR_CHECK_WARN;
+            case PENDING -> COLOR_CHECK_PENDING;
+        };
+    }
+
+    /**
+     * 在 {@code x, y} 处画校验图标，返回图标之后的文字应该从哪个 x 开始。
+     * <p>直接用字体里的符号（√ × ●），不再手拼像素块：
+     * 符号自带正确的字形与基线，换分辨率或改字号都不用重画。
+     */
+    private int drawCheckMark(GuiGraphics graphics, int x, int y) {
+        String symbol = iconFor(endpointCheck).symbol();
+        graphics.drawString(this.font, symbol, x, y, checkColor(endpointCheck), false);
+        return x + this.font.width(symbol) + CHECK_ICON_GAP;
+    }
+
+    /** 按结论挑图标形状。 */
+    private static Mark iconFor(EndpointValidator.Result result) {
+        return switch (result.level()) {
+            case OK -> Mark.CHECK;
+            case ERROR -> Mark.CROSS;
+            case WARN -> Mark.DOT_WARN;
+            case PENDING -> Mark.DOT_PENDING;
+        };
+    }
+
+    /**
+     * 整页唯一的那块滚动表格：顶部一行表头，下面每一项都是一个独立的框。
+     * <p>每项单独画边框、彼此留空隙，读起来像一条一条的条目而不是一张密排的表。
+     * 选中项边框变绿；「自定义」选中后它下方单独补一个输入框（见 {@link #initProviderPicker}）。
+     */
+    private void renderProviderList(GuiGraphics graphics, int mouseX, int mouseY) {
+        int left = pickerLeft();
+        int top = pickerTop();
+        int right = pickerRight();
+        int bottom = pickerListBottom();
+        int width = right - left;
+
+        // 外层容器
         graphics.fill(left, top, right, bottom, COLOR_LIST_BG);
-        graphics.renderOutline(left, top, PICKER_LIST_WIDTH, bottom - top, COLOR_LIST_BORDER);
+        graphics.renderOutline(left, top, width, bottom - top, COLOR_LIST_BORDER);
+
+        // 表头：与项同宽，左列「提供商」、右列「介绍」，中间一条竖线
+        int rowsTop = pickerRowsTop();
+        graphics.fill(left + 1, top + 1, right - 1, rowsTop, 0xFF2A2A2A);
+        int headerTextY = top + 1 + (PICKER_HEADER_HEIGHT - this.font.lineHeight) / 2;
+        graphics.drawString(this.font, "提供商", pickerNameX(), headerTextY, 0xFFFFFFFF, false);
+        graphics.drawString(this.font, "介绍", pickerDescX(), headerTextY, 0xFFFFFFFF, false);
+        // 表头与各块之间的分隔线
+        graphics.fill(left + 1, rowsTop - 1, right - 1, rowsTop, COLOR_LIST_BORDER);
 
         List<Providers.PickerOption> items = pickerItems();
+        int visible = pickerVisibleHeight();
         int scroll = Math.max(0, Math.min(pickerMaxScroll(), pickerScroll));
         pickerScroll = scroll;
 
-        // 只画落在可视区里的行：滚动偏移可能停在半行上，首行用 -scroll % ROW 对齐
-        int first = scroll / PICKER_ROW_HEIGHT;
-        int offset = scroll % PICKER_ROW_HEIGHT;
+        // 只画落在可视区里的块：滚动偏移可能停在半个块上，首块用 -scroll % ITEM 对齐
+        int first = scroll / PICKER_ITEM_HEIGHT;
+        int offset = scroll % PICKER_ITEM_HEIGHT;
 
-        int rowRight = right - PICKER_SCROLL_WIDTH - 1;
-        graphics.enableScissor(left + 1, top + 1, rowRight, bottom - 1);
+        int rowRight = pickerRowRight();
+        graphics.enableScissor(left + 1, rowsTop, rowRight, bottom - 1);
         for (int i = first; i < items.size(); i++) {
-            int rowTop = top + 1 + (i - first) * PICKER_ROW_HEIGHT - offset;
+            int rowTop = rowsTop + (i - first) * PICKER_ITEM_HEIGHT - offset;
             if (rowTop >= bottom - 1) break;
-            if (rowTop + PICKER_ROW_HEIGHT <= top + 1) continue;
+            int rowBottom = rowTop + PICKER_ROW_HEIGHT;
+            if (rowBottom <= rowsTop) continue;
 
             Providers.PickerOption item = items.get(i);
             // 还没选的时候「（请选择）」显示成选中态，与实际配置一致
@@ -722,90 +1064,96 @@ public class GuideScreen extends Screen {
                     : item.label().equals(pickedProvider);
 
             boolean hovered = mouseX >= left + 1 && mouseX < rowRight
-                    && mouseY >= rowTop && mouseY < rowTop + PICKER_ROW_HEIGHT;
+                    && mouseY >= rowTop && mouseY < rowBottom;
 
-            if (selected) {
-                graphics.fill(left + 1, rowTop, rowRight,
-                        Math.min(rowTop + PICKER_ROW_HEIGHT, bottom - 1), 0x5500FF00);
-            } else if (hovered) {
-                graphics.fill(left + 1, rowTop, rowRight,
-                        Math.min(rowTop + PICKER_ROW_HEIGHT, bottom - 1), 0x30FFFFFF);
-            }
+            // 每一块：自己的底 + 自己的边框，块之间靠 PICKER_ROW_GAP 隔开
+            // 「自定义」校验失败/警告时，这一块的底色与边框跟着变色，
+            // 让玩家一眼看出红字说的是哪一项
+            boolean tinted = item.isCustom() && customMode() && endpointCheck != null
+                    && endpointCheck.level() != EndpointValidator.Level.OK;
+            int itemBorderColor = selected
+                    ? (tinted ? checkColor(endpointCheck) : COLOR_ROW_SELECTED)
+                    : hovered ? 0xFFFFFFFF : COLOR_ITEM_BORDER;
+            int itemBg = tinted
+                    ? (endpointCheck.level() == EndpointValidator.Level.ERROR
+                            ? 0x55FF0000   // 半透明红
+                            : 0x55FFAA00)  // 半透明橙/黄共用的暖色
+                    : selected ? 0x55336644 : hovered ? 0xFF2E2E2E : COLOR_ITEM_BG;
 
-            int color = selected ? COLOR_ROW_SELECTED : hovered ? 0xFFFFFFFF : 0xFFCCCCCC;
+            graphics.fill(left + 1, rowTop, rowRight, rowBottom, itemBg);
+            graphics.renderOutline(left + 1, rowTop, rowRight - left - 1, PICKER_ROW_HEIGHT,
+                    itemBorderColor);
+
             int textY = rowTop + (PICKER_ROW_HEIGHT - this.font.lineHeight) / 2;
-            graphics.drawString(this.font, item.label(),
-                    left + PICKER_TEXT_INSET, textY, color, false);
+
+            // 左列：提供商名
+            int nameColor = selected ? COLOR_ROW_SELECTED : hovered ? 0xFFFFFFFF : 0xFFDDDDDD;
+            graphics.drawString(this.font, item.label(), pickerNameX(), textY, nameColor, false);
+
+            // 右列：介绍。
+            // 选中「自定义」时这一行的介绍位置被输入框盖住，这里就不必画了——
+            // 画了也会被输入框的实心底色挡住，白白多一次绘制
+            if (!item.desc().isEmpty() && !(item.isCustom() && customMode())) {
+                int descColor = selected ? 0xFFE8E8E8 : hovered ? 0xFFE0E0E0 : 0xFF9A9A9A;
+                // 超出右列宽度就截断加省略号，绝不越出这一块
+                int maxWidth = rowRight - pickerDescX() - 4;
+                graphics.drawString(this.font, trimToWidth(item.desc(), maxWidth),
+                        pickerDescX(), textY, descColor, false);
+            }
         }
         graphics.disableScissor();
 
-        // 滚动条：内容装得下时不画
+        // 右侧滚动条：内容装得下时不画
         int maxScroll = pickerMaxScroll();
         if (maxScroll > 0) {
             int trackX = right - PICKER_SCROLL_WIDTH - 1;
-            int trackTop = top + 1;
+            int trackTop = rowsTop;
             int trackBottom = bottom - 1;
             int trackHeight = trackBottom - trackTop;
-            int contentHeight = items.size() * PICKER_ROW_HEIGHT;
-            int thumbHeight = Math.max(12, trackHeight * PICKER_LIST_VISIBLE / contentHeight);
+            int contentHeight = items.size() * PICKER_ITEM_HEIGHT;
+            int thumbHeight = Math.max(16, trackHeight * visible / contentHeight);
             int thumbY = trackTop + (int) ((long) (trackHeight - thumbHeight) * scroll / maxScroll);
-            graphics.fill(trackX, trackTop, trackX + PICKER_SCROLL_WIDTH, trackBottom, 0xFF333333);
-            graphics.fill(trackX, thumbY, trackX + PICKER_SCROLL_WIDTH, thumbY + thumbHeight, 0xFFAAAAAA);
+            graphics.fill(trackX, trackTop, trackX + PICKER_SCROLL_WIDTH, trackBottom, 0xFF3A3A3A);
+            graphics.fill(trackX, thumbY, trackX + PICKER_SCROLL_WIDTH, thumbY + thumbHeight, 0xFFCCCCCC);
         }
     }
 
-    /** 右列：选中项的介绍；选「自定义」时换成 Endpoint 输入框。 */
-    private void renderProviderPanel(GuiGraphics graphics) {
-        int left = pickerPanelLeft();
-        int top = pickerPanelTop();
-        int right = left + PICKER_PANEL_WIDTH;
-        int bottom = pickerListBottom();
+    /**
+     * 把文字截到指定像素宽度内，超出部分换成省略号。
+     * <p>中文按像素量宽，字符数不等于显示宽度，只能逐字累加。
+     */
+    private String trimToWidth(String text, int maxWidth) {
+        if (maxWidth <= 0) return "";
+        if (this.font.width(text) <= maxWidth) return text;
+        String ellipsis = "…";
+        int budget = maxWidth - this.font.width(ellipsis);
+        if (budget <= 0) return "";
+        StringBuilder sb = new StringBuilder();
+        int used = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            int w = this.font.width(String.valueOf(c));
+            if (used + w > budget) break;
+            sb.append(c);
+            used += w;
+        }
+        return sb + ellipsis;
+    }
 
-        graphics.fill(left, top, right, bottom, COLOR_LIST_BG);
-        graphics.renderOutline(left, top, PICKER_PANEL_WIDTH, bottom - top, COLOR_LIST_BORDER);
-
-        if (customMode()) {
-            // 输入框本身就是控件（由 super.render 绘制），这里只补一句说明。
-            // 位置从输入框下方起算，避免和输入框内的灰色斜体提示叠在一起。
-            int y = top + PICKER_ROW_HEIGHT + 12;
-            int wrapWidth = PICKER_PANEL_WIDTH - 12;
-            String note = "仅限 OpenAI 接口。地址一般以 /v1 结尾，填错会连不上。";
-            for (FormattedCharSequence line : this.font.split(Component.literal(note), wrapWidth)) {
-                if (y + this.font.lineHeight > bottom - 4) break;
-                graphics.drawString(this.font, line, left + 6, y, COLOR_NEUTRAL, false);
-                y += this.font.lineHeight + 2;
-            }
+    /**
+     * 「不想为 API 付费？」链接，放在「确认」按钮正上方。
+     * <p>内容：普通文字 + 可点的绿色方括号，悬停出提示。
+     */
+    private void renderOllamaLink(GuiGraphics graphics, int mouseX, int mouseY) {
+        // 有校验结论要显示时把这一行藏起来：结论行就落在它附近，
+        // 两行叠在一起会互相压字
+        if (endpointCheck != null) {
+            resetOllamaLink();
             return;
         }
 
-        Providers.PickerOption option = pickedProvider == null
-                ? pickerItems().get(0) : Providers.pickerOption(pickedProvider);
-        if (option == null) return;
-
-        // 介绍按面板宽度折行，从面板顶端开始往下排
-        int y = top + 6;
-        int wrapWidth = PICKER_PANEL_WIDTH - 12;
-        for (FormattedCharSequence line : this.font.split(Component.literal(option.desc()), wrapWidth)) {
-            if (y + this.font.lineHeight > bottom - 4) break;
-            graphics.drawString(this.font, line, left + 6, y, COLOR_NEUTRAL, false);
-            y += this.font.lineHeight + 2;
-        }
-
-        // 选中项的额外技术提示（如「模型尚未配置」）放在介绍下面，金色提醒
-        if (providerChosen() && option.note() != null) {
-            y += 4;
-            for (FormattedCharSequence line : this.font.split(Component.literal(option.note()), wrapWidth)) {
-                if (y + this.font.lineHeight > bottom - 4) break;
-                graphics.drawString(this.font, line, left + 6, y, COLOR_DONE, false);
-                y += this.font.lineHeight + 2;
-            }
-        }
-    }
-
-    /** 底部的「不想为 API 付费？」链接：普通文字 + 可点的绿色方括号，悬停出提示。 */
-    private void renderOllamaLink(GuiGraphics graphics, int mouseX, int mouseY) {
         int centerX = this.width / 2;
-        int y = pickerListBottom() + 10;
+        int y = ollamaLinkY();
 
         String lead = "不想为 API 付费？";
         String action = "[点击此处]";
@@ -832,38 +1180,67 @@ public class GuideScreen extends Screen {
         }
     }
 
+    /** 清空 Ollama 链接的可点区域（隐藏它时要一并清掉，否则会留下看不见的可点区）。 */
+    private void resetOllamaLink() {
+        this.ollamaLinkLeft = 0;
+        this.ollamaLinkRight = 0;
+        this.ollamaLinkTop = 0;
+        this.ollamaLinkBottom = 0;
+    }
+
     /** 鼠标是否停在「点击此处」上。 */
     private boolean ollamaLinkHovered(int mouseX, int mouseY) {
         return mouseX >= ollamaLinkLeft && mouseX < ollamaLinkRight
                 && mouseY >= ollamaLinkTop && mouseY < ollamaLinkBottom;
     }
 
-    /** 提示行 Y：Ollama 链接下方。 */
+    /**
+     * Ollama 链接的 Y：紧贴在「确认」按钮上方。
+     * <p>它的位置只由按钮决定，不跟表格高度走：表格最高只到它的上沿，
+     * 所以窗口怎么变，这行小字都稳稳落在按钮正上方。
+     */
+    private int ollamaLinkY() {
+        return this.height - BUTTON_BOTTOM_MARGIN - this.font.lineHeight - 8;
+    }
+
+    /** 提示行的 Y：按钮下方，不挤占表格。 */
     private int providerHintY() {
-        return pickerListBottom() + 10 + this.font.lineHeight + 6;
+        return this.height - BUTTON_BOTTOM_MARGIN + BUTTON_HEIGHT + 6;
     }
 
     /**
-     * 鼠标位置落在列表的哪一行上；不在列表内或落在空白处时返回 {@code null}。
+     * 点击是否落在「自定义」那一行的 Endpoint 输入框上。
+     * <p>那块区域在表格内部，但视觉上已经是输入框；不把它从「点选行」里
+     * 摘出来，点击会被列表逻辑吃掉，输入框永远拿不到焦点。
+     */
+    private boolean isEndpointBoxHit(double mouseX, double mouseY) {
+        return endpointBox != null
+                && mouseX >= endpointBox.getX() && mouseX < endpointBox.getX() + endpointBox.getWidth()
+                && mouseY >= endpointBox.getY() && mouseY < endpointBox.getY() + endpointBox.getHeight();
+    }
+
+    /**
+     * 鼠标位置落在表格的哪一行上；不在表格内时返回 {@code null}。
      * <p>换算方式与 {@link #renderProviderList} 的绘制保持一致：
      * 先算行号，再用同一个滚动偏移反推这一行的屏幕位置。
      */
     private String pickerRowAt(double mouseX, double mouseY) {
-        int left = pickerListLeft();
-        int top = pickerPanelTop();
-        int right = left + PICKER_LIST_WIDTH - PICKER_SCROLL_WIDTH - 1;
+        int left = pickerLeft();
+        int right = pickerRight();
         int bottom = pickerListBottom();
-        if (mouseX < left + 1 || mouseX >= right || mouseY < top + 1 || mouseY >= bottom - 1) {
+        // 表头区域不算在内：它不是可选项
+        if (mouseX < left + 1 || mouseX >= right
+                || mouseY < pickerRowsTop() || mouseY >= bottom - 1) {
             return null;
         }
 
         List<Providers.PickerOption> items = pickerItems();
         int scroll = Math.max(0, Math.min(pickerMaxScroll(), pickerScroll));
-        int first = scroll / PICKER_ROW_HEIGHT;
-        int offset = scroll % PICKER_ROW_HEIGHT;
+        int first = scroll / PICKER_ITEM_HEIGHT;
+        int offset = scroll % PICKER_ITEM_HEIGHT;
 
         for (int i = first; i < items.size(); i++) {
-            int rowTop = top + 1 + (i - first) * PICKER_ROW_HEIGHT - offset;
+            int rowTop = pickerRowsTop() + (i - first) * PICKER_ITEM_HEIGHT - offset;
             if (mouseY >= rowTop && mouseY < rowTop + PICKER_ROW_HEIGHT) {
                 return items.get(i).label();
             }
@@ -874,19 +1251,22 @@ public class GuideScreen extends Screen {
 
     /**
      * 第 1 步的列表滚轮。
-     * <p>先于 {@code super} 处理：列表是自绘的，交给控件链的话会被当成「没人要」的事件。
+     * <p>先于 {@code super} 处理：表格是自绘的，交给控件链的话会被当成「没人要」的事件。
      */
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (position == Position.STEP && step == STEP_PROVIDER) {
-            int left = pickerListLeft();
-            int right = left + PICKER_LIST_WIDTH;
-            if (mouseX >= left && mouseX < right
-                    && mouseY >= pickerPanelTop() && mouseY < pickerListBottom()
+            if (mouseX >= pickerLeft() && mouseX < pickerRight()
+                    && mouseY >= pickerTop() && mouseY < pickerListBottom()
                     && pickerMaxScroll() > 0) {
-                // 一次滚一格（整行），半行滚动会让列表看起来在抖
+                int before = pickerScroll;
+                // 一次滚一块，半块滚动会让列表看起来在抖
                 pickerScroll = Math.max(0, Math.min(pickerMaxScroll(),
-                        pickerScroll - (int) Math.round(delta) * PICKER_ROW_HEIGHT));
+                        pickerScroll - (int) Math.round(delta) * PICKER_ITEM_HEIGHT));
+                // 输入框钉在「自定义」那一块下方，块随滚动移动，输入框也得跟着走
+                if (endpointBox != null && pickerScroll != before) {
+                    endpointBox.setY(customBoxY());
+                }
                 return true;
             }
         }
@@ -1408,6 +1788,10 @@ public class GuideScreen extends Screen {
         if (position == Position.START) {
             renderStartText(graphics);
         } else if (position == Position.STEP && step == STEP_PROVIDER) {
+            // 输入框的边框颜色跟着校验状态走：没有结论时是选中绿
+            GreenBorderedEditBox.setBorderColor(
+                    endpointCheck != null && customMode()
+                            ? checkColor(endpointCheck) : COLOR_ROW_SELECTED);
             renderProviderStep(graphics, mouseX, mouseY);
         } else {
             graphics.drawCenteredString(this.font, Component.literal(bodyText()),
@@ -1415,6 +1799,31 @@ public class GuideScreen extends Screen {
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    /**
+     * 驱动输入框的光标闪烁。
+     *
+     * <p>{@link EditBox} 的光标显隐条件是
+     * {@code isFocused() && 闪烁计时 / 6 % 2 == 0}，而那个计时器只在
+     * {@code EditBox.tick()} 里自增。它是普通的 {@code AbstractWidget}，
+     * 没有自动的 tick 回调，不手动调用的话计时器永远停在 0，
+     * 光标就一直亮着、不闪。
+     *
+     * <p>必须放在 {@code tick()} 而不是 {@code render()} 里：
+     * 原版的闪烁节奏是按 <b>tick</b>（固定 20/秒）算的，跟着帧率走的话
+     * 高帧率下会闪得只剩一片虚影。
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        if (endpointBox != null) {
+            endpointBox.tick();
+        }
+        // 停止输入满 2 秒就发起探活
+        if (position == Position.STEP && step == STEP_PROVIDER) {
+            tickEndpointCheck();
+        }
     }
 
     @Override
@@ -1437,8 +1846,19 @@ public class GuideScreen extends Screen {
                     openOllama();
                     return true;
                 }
+                // 校验失败后的「[点击此处]重新尝试」
+                if (customMode() && retryLinkClicked(mouseX, mouseY)) {
+                    retryEndpointCheck();
+                    return true;
+                }
                 String picked = pickerRowAt(mouseX, mouseY);
                 if (picked != null) {
+                    // 「自定义」被选中后，这一行的右列已经被输入框占据。
+                    // 点击落在那块区域要交给输入框（否则它永远拿不到焦点、
+                    // 打不了字），只有点在左列名字上才算「重新选这一项」。
+                    if (isEndpointBoxHit(mouseX, mouseY)) {
+                        return super.mouseClicked(mouseX, mouseY, button);
+                    }
                     onProviderPicked(picked);
                     return true;
                 }
@@ -1483,5 +1903,75 @@ public class GuideScreen extends Screen {
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+
+    /**
+     * 边框是绿色的输入框。
+     *
+     * <p>它被塞进「自定义」那一项的选中框里，原版的白色边框套在绿框里会像
+     * 「框中框」，所以要自己画边框。
+     *
+     * <p><b>但不能关掉 {@code setBordered(false)}。</b> 反编译 1.20.1 的
+     * {@code EditBox.renderWidget} 可以看到 bordered 同时决定两件事：
+     * <ul>
+     *   <li>文字 Y：{@code bordered ? y + (height - 8) / 2 : y} —— 关掉后文字
+     *       从垂直居中变成贴顶，会整体上移 4px；</li>
+     *   <li>提示文字的绘制条件：{@code hint != null && value.isEmpty() && !isFocused()}
+     *       —— 与 bordered 无关，但关掉后背景也不画了，白底会透出来。</li>
+     * </ul>
+     * 所以这里<b>保持 bordered 为 true</b>，只在自己画的绿框之前先让父类画一遍，
+     * 用纯黑底盖住原版的白框与浅色底，最后再把绿框补在最上层。
+     */
+    private static final class GreenBorderedEditBox extends EditBox {
+
+        /**
+         * 边框颜色。
+         * <p>做成静态可变字段：本类是 {@code static} 嵌套类，拿不到外部实例的校验状态；
+         * 而同一时刻界面上最多只有一个这样的输入框，用静态字段传色最简单。
+         * 外部在每次 {@code render} 之前按校验结果设置它。
+         */
+        private static int borderColor = COLOR_ROW_SELECTED;
+
+        /** 由外部按校验结果设置边框颜色。 */
+        static void setBorderColor(int color) {
+            borderColor = color;
+        }
+
+        GreenBorderedEditBox(net.minecraft.client.gui.Font font, int x, int y, int width, int height,
+                             Component message) {
+            super(font, x, y, width, height, message);
+        }
+
+        @Override
+        public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            // 父类会按顺序画：外扩 1px 的边框（聚焦白/否则灰）→ 纯黑底 →
+            // 文字与光标 → 提示文字。全部交给它，本类只改两件事。
+            super.renderWidget(graphics, mouseX, mouseY, partialTick);
+
+            int x = getX();
+            int y = getY();
+            int w = getWidth();
+            int h = getHeight();
+
+            // 1. 把父类那一圈边框涂成当前状态色。
+            //    只涂边框（外扩 1px 的四条 1px 线），不碰内部，
+            //    否则会把刚画好的文字和光标一起擦掉。
+            graphics.fill(x - 1, y - 1, x + w + 1, y, borderColor);            // 上
+            graphics.fill(x - 1, y + h, x + w + 1, y + h + 1, borderColor);    // 下
+            graphics.fill(x - 1, y, x, y + h, borderColor);                    // 左
+            graphics.fill(x + w, y, x + w + 1, y + h, borderColor);            // 右
+
+            // 2. 提示文字：父类只在「未聚焦」时画（hint != null && value.isEmpty()
+            //    && !isFocused()）。这个输入框一被点中就聚焦，提示当场消失，
+            //    玩家反而看不到该填什么。这里在聚焦且为空时补画一份。
+            if (getValue().isEmpty() && isFocused()) {
+                Component hint = Component.literal("请填入 AI 提供商文档中的AI Endpoint")
+                        .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC);
+                // 与父类同样的排版：左内边距 4px、垂直居中
+                graphics.drawString(Minecraft.getInstance().font, hint,
+                        x + 4, y + (h - 8) / 2, 0xFF777777, false);
+            }
+        }
     }
 }
