@@ -42,6 +42,31 @@ public final class Providers {
     /** 「自定义」的固定名字：多处逻辑依赖这个名字做判断。 */
     public static final String CUSTOM = "自定义";
 
+    /**
+     * 引导流程第一页里「自定义」那一项的显示名。
+     * <p>与 {@link #CUSTOM} 并存而不是直接复用它：注册表里的 {@code 自定义}
+     * 是「地址由玩家填」的兜底项，这里是下拉框里给玩家看的标签，两者语义相同、
+     * 措辞可以各走各的。写配置时统一落到 {@code OPENAI}。
+     */
+    public static final String CUSTOM_LABEL = "自定义";
+
+    /**
+     * 引导第一页下拉框里「还没选」的那一项。
+     * <p>它不是一个真正的提供商，选中它不写任何配置。
+     */
+    public static final String PICKER_PLACEHOLDER = "（请选择）";
+
+    /**
+     * Verity 侧 {@code aiProvider} 的枚举值与本地化名。
+     * <p>这几个值是写进 {@code verity-common.toml} 的字面量，必须与 Verity 的
+     * {@code AiProvider} 枚举完全一致；写错了 Verity 会因为「非法枚举值」
+     * 把整份配置打回默认。
+     */
+    public static final String GEMINI = "GEMINI";
+    public static final String GROQ = "GROQ";
+    public static final String OPENAI = "OPENAI";
+    public static final String OLLAMA = "OLLAMA";
+
     private static final Map<String, Provider> REGISTRY = new LinkedHashMap<>();
 
     private static void put(Provider provider) {
@@ -153,7 +178,9 @@ public final class Providers {
         return baseUrl + "/chat/completions";
     }
 
-    /** 由 Base URL 反查提供商；没匹配上任何预定义端点时算「自定义」。 */
+    /**
+     * 由 Base URL 反查提供商；没匹配上任何预定义端点时算「自定义」。
+     */
     public static String inferFromEndpoint(String endpoint, String fallback) {
         if (endpoint == null || endpoint.isEmpty()) return fallback;
         for (Provider provider : REGISTRY.values()) {
@@ -162,5 +189,100 @@ public final class Providers {
             }
         }
         return CUSTOM;
+    }
+
+    // ========== 引导第一页：提供商列表 ==========
+
+    /**
+     * 引导第一页列表里的一项。
+     *
+     * @param label     左边一列显示的提供商名
+     * @param desc      右边一列显示的介绍；为空表示这一项没有介绍（选中后右列换成输入框）
+     * @param provider  选中后要写进 {@code aiProvider} 的值；{@code null} 表示只有 {@code endpoint}
+     * @param endpoint  选中后要写进 {@code aiEndpoint} 的地址；{@code null} 表示不写
+     * @param note      选中后额外补一行技术提示；{@code null} 表示没有
+     */
+    public record PickerOption(String label, String desc,
+                               String provider, String endpoint, String note) {
+
+        /** 「自定义」：地址由玩家自己填，右列换成输入框。 */
+        public boolean isCustom() {
+            return CUSTOM_LABEL.equals(label);
+        }
+
+        /** 「（请选择）」：占位项，选中它不写任何配置。 */
+        public boolean isPlaceholder() {
+            return PICKER_PLACEHOLDER.equals(label);
+        }
+    }
+
+    /**
+     * 真正落地时的 {@code aiProvider}。
+     * <p>DeepSeek / 智谱 / ChatGPT / OpenRouter / Mistral 走的都是 OpenAI 兼容接口，
+     * Verity 侧只能填 {@code OPENAI}，靠 {@code aiEndpoint} 区分；
+     * 只有 Gemini / GROQ 是独立枚举。
+     * <p>ChatGPT 的 {@code aiEndpoint} 目前留空：地址还没定，先只切提供商，
+     * 不能拿别的端点顶上去——填错了请求会打到完全不相干的服务上。
+     */
+    private static List<PickerOption> pickerTemplate() {
+        List<PickerOption> list = new ArrayList<>();
+        list.add(new PickerOption(PICKER_PLACEHOLDER, "选择一个你中意的 AI 提供商",
+                null, null, null));
+        list.add(new PickerOption("GROQ", "试玩首选（仅国外），极速输出，有免费额度，国内可能无法稳定访问",
+                GROQ, null, "已切换为 GROQ，但模型尚未配置"));
+        list.add(new PickerOption("DeepSeek", "对话自然，擅长深度思考，性价比高，分峰谷计费",
+                OPENAI, "https://api.deepseek.com/v1", null));
+        list.add(new PickerOption("智谱", "试玩首选，上手轻便，有免费模型与免费额度，部分时间段可能反应迟钝",
+                OPENAI, "https://open.bigmodel.cn/api/paas/v4", null));
+        // 地址待定：只切 provider，不写 endpoint
+        list.add(new PickerOption("ChatGPT", "能力顶尖，功能强大，价格偏高，国内无法正常访问",
+                OPENAI, null, "ChatGPT 的 Endpoint 尚未内置，请自行填写后再使用"));
+        list.add(new PickerOption("Gemini", "聪慧（？），有免费额度，国内无法正常访问",
+                GEMINI, null, "已切换为 Gemini，但模型尚未配置"));
+        list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内可能无法稳定访问",
+                OPENAI, "https://openrouter.ai/api/v1", null));
+        list.add(new PickerOption("Mistral", "多语言表现佳，有免费额度，国内无法正常访问",
+                OPENAI, "https://api.mistral.ai/v1", null));
+        list.add(new PickerOption(CUSTOM_LABEL, "",
+                OPENAI, null, null));
+        return list;
+    }
+
+    /**
+     * 按界面语言排好的列表项。
+     * <p>「非简中时向后排」的三项（GROQ / ChatGPT / Gemini）在简体中文环境里排在
+     * DeepSeek / 智谱 之前，其余语言里挪到它们后面——国内不方便直接用。
+     * 判定只看界面语言：玩家把游戏切成英文通常也意味着在能用它们的环境里。
+     * <p>OpenRouter 与 Mistral 按需求固定排在 Gemini 之后，不参与调整。
+     *
+     * @param simplifiedChinese 界面语言是否是简体中文
+     */
+    public static List<PickerOption> pickerOptions(boolean simplifiedChinese) {
+        List<PickerOption> all = pickerTemplate();
+        PickerOption placeholder = all.get(0);
+        List<PickerOption> cn = List.of(all.get(2), all.get(3));             // DeepSeek, 智谱
+        List<PickerOption> foreign = List.of(all.get(1), all.get(4), all.get(5)); // GROQ, ChatGPT, Gemini
+        List<PickerOption> tail = List.of(all.get(6), all.get(7), all.get(8));    // OpenRouter, Mistral, 自定义
+
+        List<PickerOption> options = new ArrayList<>();
+        options.add(placeholder);
+        if (simplifiedChinese) {
+            options.addAll(foreign);
+            options.addAll(cn);
+        } else {
+            options.addAll(cn);
+            options.addAll(foreign);
+        }
+        options.addAll(tail);
+        return options;
+    }
+
+    /** 按显示名找回列表里的一项；找不到时返回 {@code null}。 */
+    public static PickerOption pickerOption(String label) {
+        if (label == null) return null;
+        for (PickerOption option : pickerTemplate()) {
+            if (option.label().equals(label)) return option;
+        }
+        return null;
     }
 }

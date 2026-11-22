@@ -196,6 +196,7 @@ public class VerityConfigManager {
             if (ConfigFileUtils.lineMatchesKey(line, "apiKey")) data.apiKey = ConfigFileUtils.extractStringValue(line);
             else if (ConfigFileUtils.lineMatchesKey(line, "aiEndpoint")) data.endpoint = ConfigFileUtils.extractStringValue(line);
             else if (ConfigFileUtils.lineMatchesKey(line, "aiModel")) data.model = ConfigFileUtils.extractStringValue(line);
+            else if (ConfigFileUtils.lineMatchesKey(line, "aiProvider")) data.provider = ConfigFileUtils.extractStringValue(line);
             else if (ConfigFileUtils.lineMatchesKey(line, "aiThink")) data.think = ConfigFileUtils.parseBoolean(line);
             else if (ConfigFileUtils.lineMatchesKey(line, "ttsProvider")) data.ttsProvider = ConfigFileUtils.extractStringValue(line);
             else if (ConfigFileUtils.lineMatchesKey(line, "useTTS")) data.useTTS = ConfigFileUtils.parseBoolean(line);
@@ -255,7 +256,7 @@ public class VerityConfigManager {
         ConfigFileUtils.replaceOrAddRaw(lines, "aiThink", String.valueOf(data.think));
         ConfigFileUtils.replaceOrAddRaw(lines, "useTTS", String.valueOf(data.useTTS));
         ConfigFileUtils.replaceOrAddString(lines, "ttsProvider", data.ttsProvider);
-        ConfigFileUtils.replaceOrAddString(lines, "aiProvider", "OPENAI");
+        ConfigFileUtils.replaceOrAddString(lines, "aiProvider", data.provider);
         ConfigFileUtils.writeLines(file, lines);
     }
 
@@ -377,6 +378,12 @@ public class VerityConfigManager {
         public String apiKey = "";
         public String endpoint = "";
         public String model = "";
+        /**
+         * Verity 的 {@code aiProvider}（枚举值：OPENAI / GEMINI / GROQ / OLLAMA …）。
+         * <p>之前这里不存它，写盘时永远固定写 {@code OPENAI}，等于把玩家选的
+         * GROQ / GEMINI / Ollama 全部改回 OpenAI。引导流程要切提供商，所以必须带上。
+         */
+        public String provider = "OPENAI";
         public boolean think = false;
         public boolean useTTS = true;
         public String ttsProvider = "LOCAL";
@@ -387,6 +394,7 @@ public class VerityConfigManager {
             copy.apiKey = this.apiKey;
             copy.endpoint = this.endpoint;
             copy.model = this.model;
+            copy.provider = this.provider;
             copy.think = this.think;
             copy.useTTS = this.useTTS;
             copy.ttsProvider = this.ttsProvider;

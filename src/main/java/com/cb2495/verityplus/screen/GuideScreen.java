@@ -1,11 +1,16 @@
 package com.cb2495.verityplus.screen;
 
 import com.cb2495.verityplus.client.ModpackHelperBridge;
+import com.cb2495.verityplus.client.OllamaSetupScreenZh;
 import com.cb2495.verityplus.config.GameState;
+import com.cb2495.verityplus.config.Providers;
+import com.cb2495.verityplus.config.VerityConfigManager;
+import com.cb2495.verityplus.util.Log;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -118,6 +123,20 @@ public class GuideScreen extends Screen {
     private final int step;
 
     /**
+     * 第 1 步（选提供商）当前选中的下拉框文字，{@code null} 表示还是「（请选择）」。
+     * <p>做成静态：下拉框的选择要能跨页保存——玩家往下翻再翻回来、
+     * 或者去了 Ollama 配置页再回来，都不该回到「（请选择）」。
+     * 静态值只在文件末尾的 setter 里写，和进度条那组动画状态是同一套做法。
+     */
+    private static String pickedProvider = null;
+
+    /**
+     * 第 1 步「自定义」填的 Endpoint。同样是静态，理由同上，
+     * 而且比选中项更需要保住：那是一段手打出来的地址。
+     */
+    private static String customEndpoint = "";
+
+    /**
      * 结束引导后要做的事（回到来处）；为 {@code null} 表示直接关掉回游戏。
      * <p>用回调而不是直接引用 Verity 的配置界面：让依赖保持单向
      * {@code client → screen}，{@code GuideScreen} 不必知道配置界面怎么构造。
@@ -196,6 +215,7 @@ public class GuideScreen extends Screen {
      */
     public static GuideScreen start(Runnable onFinished) {
         resetBarAnimation();
+        resetStepAnswers();
         return new GuideScreen(Position.START, 1, onFinished);
     }
 
@@ -211,9 +231,37 @@ public class GuideScreen extends Screen {
         maxReachedStep = 0;
     }
 
+    /**
+     * 欢迎页，但<b>保留</b>各步骤已经填好的内容。
+     * <p>用于第 1 步按「←」退回欢迎页：进度条动画重来一遍没什么损失，
+     * 但玩家刚选的提供商不该被抹掉。他再点「开始」时还是原来那一项。
+     */
+    private static GuideScreen startKeepingAnswers(Runnable onFinished) {
+        resetBarAnimation();
+        return new GuideScreen(Position.START, 1, onFinished);
+    }
+
+    /**
+     * 清空各步骤自己记住的填写结果（第 1 步的下拉框与自定义地址）。
+     * <p>只在<b>新一轮</b>引导开始时调用：从第 N 步按「←」退回第 N-1 步不算新一轮，
+     * 那时玩家的选择必须还在。
+     */
+    private static void resetStepAnswers() {
+        pickedProvider = null;
+        customEndpoint = "";
+    }
     /** 第 {@code step} 步（1 起算）。 */
     public static GuideScreen step(int step, Runnable onFinished) {
         return new GuideScreen(Position.STEP, step, onFinished);
+    }
+
+    /**
+     * 第 1 步：选提供商。
+     * <p>从别的界面（Ollama 配置页、导入旧存档）回来时用这个，
+     * 它<b>不</b>清空已选中的提供商——玩家回来看的就是他刚才选的那一项。
+     */
+    public static void openStep1(Runnable onFinished) {
+        Minecraft.getInstance().setScreen(step(1, onFinished));
     }
 
     /** 结束页。 */
@@ -285,7 +333,7 @@ public class GuideScreen extends Screen {
         //   欢迎页「开始」→ 中间各步统一「继续」→ 结束页「完成」
         Component mainLabel = switch (position) {
             case START -> Component.literal("开始");
-            case STEP -> Component.literal("继续");
+            case STEP -> Component.literal(step == STEP_PROVIDER ? "确认" : "继续");
             case FINISH -> Component.literal("完成");
         };
 
@@ -313,6 +361,11 @@ public class GuideScreen extends Screen {
             this.addRenderableWidget(Button.builder(
                             Component.literal("导入旧存档").withStyle(ChatFormatting.GRAY), btn -> importLegacy())
                     .pos(centerX, buttonY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+        }
+
+        // 第 1 步自己的控件：提供商下拉框、Ollama 入口、自定义 Endpoint 输入框
+        if (position == Position.STEP && step == STEP_PROVIDER) {
+            initProviderPicker(buttonY);
         }
 
         // 进度条要等点了「开始」才出现；欢迎页上它一直处于未展开状态。
@@ -356,8 +409,10 @@ public class GuideScreen extends Screen {
                 if (step > 1) {
                     mc.setScreen(GuideScreen.step(step - 1, onFinished));
                 } else {
-                    // 第 1 步的上一页是欢迎页
-                    mc.setScreen(GuideScreen.start(onFinished));
+                    // 第 1 步的上一页是欢迎页。
+                    // 这里不能走 start()：那个工厂会清空各步骤的填写结果，
+                    // 玩家只是退回欢迎页看一眼，再点「开始」时选择必须还在。
+                    mc.setScreen(GuideScreen.startKeepingAnswers(onFinished));
                 }
                 return;
             }
@@ -373,6 +428,15 @@ public class GuideScreen extends Screen {
         switch (position) {
             case START -> mc.setScreen(GuideScreen.step(1, onFinished));
             case STEP -> {
+                // 第 1 步要先选好提供商：没选就往下走，下一步会拿着空配置继续，
+                // 玩家到最后才发现前面白填。（可点金色细条跳页，那条路不校验。）
+                if (step == STEP_PROVIDER) {
+                    if (!providerChosen()) {
+                        showProviderHint("请先选择一个提供商", COLOR_WARN);
+                        return;
+                    }
+                    if (!commitProviderChoice()) return;
+                }
                 if (step >= GameState.STEPS) {
                     mc.setScreen(GuideScreen.finish(onFinished));
                 } else {
@@ -387,6 +451,448 @@ public class GuideScreen extends Screen {
         finish();
     }
 
+    // ================= 第 1 步：选提供商 =================
+
+    /** 第 1 步的步号。 */
+    private static final int STEP_PROVIDER = 1;
+
+    /** 第 1 步的标题。 */
+    private static final String PROVIDER_QUESTION = "首先，请选择 Verity AI 大脑的提供商";
+
+    /** 第 1 步左侧列表与右侧介绍面板的宽度。 */
+    private static final int PICKER_LIST_WIDTH = 170;
+    private static final int PICKER_PANEL_WIDTH = 200;
+    /** 列表与右侧面板之间的间隙。 */
+    private static final int PICKER_COLUMN_GAP = 10;
+    /** 列表一行的行高。 */
+    private static final int PICKER_ROW_HEIGHT = 18;
+    /** 列表左右内边距。 */
+    private static final int PICKER_TEXT_INSET = 4;
+    /** 列表可视高度（不含滚动条与边框）。 */
+    private static final int PICKER_LIST_VISIBLE = PICKER_ROW_HEIGHT * 9;
+    /** 列表滚动条宽度。 */
+    private static final int PICKER_SCROLL_WIDTH = 3;
+
+    /** 提示文字的颜色：正常（中性）、警告（红）、成功（绿）。 */
+    private static final int COLOR_NEUTRAL = 0xFFAAAAAA;
+    private static final int COLOR_WARN = 0xFFFF5555;
+    private static final int COLOR_OK = 0xFF55FF55;
+
+    /** 列表底色与边框。 */
+    private static final int COLOR_LIST_BG = 0xC0000000;
+    private static final int COLOR_LIST_BORDER = 0xFF555555;
+    private static final int COLOR_ROW_SELECTED = 0xFF4CAF50;
+
+    /** 「自定义」的 Endpoint 输入框，渲染与按键判断都要用。 */
+    private EditBox endpointBox;
+
+    /**
+     * 第 1 步当前要显示的提示文字与颜色。
+     * <p>没有提示时它就是一条空的占位，占据同一行高度——
+     * 否则提示一出现就会把下面的按钮往下顶，点「确认」时按钮会在脚下跳走。
+     */
+    private String providerHint = "";
+    private int providerHintColor = COLOR_NEUTRAL;
+
+    /** 列表滚动偏移（像素）。 */
+    private int pickerScroll = 0;
+
+    /** 「点击此处」链接在屏幕上的区域，render 时更新，点击时读取。 */
+    private int ollamaLinkLeft = 0;
+    private int ollamaLinkRight = 0;
+    private int ollamaLinkTop = 0;
+    private int ollamaLinkBottom = 0;
+
+    /** 当前是「自定义」：右侧说明换成了 Endpoint 输入框。 */
+    private boolean customMode() {
+        return Providers.CUSTOM_LABEL.equals(pickedProvider);
+    }
+
+    /** 已经选好了提供商（「（请选择）」不算）。 */
+    private boolean providerChosen() {
+        return pickedProvider != null && !Providers.PICKER_PLACEHOLDER.equals(pickedProvider);
+    }
+
+    /**
+     * 第 1 步的控件布局。
+     * <p>列表与右侧面板都是自绘的（见 {@link #renderProviderStep}），
+     * 这里只放真正需要事件系统的控件：自定义输入框、「确认」。
+     * <p>原来那个下拉框不再使用：整屏只填一个 240px 宽的下拉框太空，
+     * 换来的是中间一整块两列的滚动列表 + 介绍面板。
+     */
+    private void initProviderPicker(int buttonY) {
+        int centerX = this.width / 2;
+
+        // 自定义模式的输入框：占满右侧面板。
+        // 往里缩 4px，否则它自带的边框会压在面板边框上，看起来像外框套内框。
+        if (customMode()) {
+            EditBox box = new EditBox(this.font, pickerPanelLeft() + 4, pickerPanelTop() + 4,
+                    PICKER_PANEL_WIDTH - 8, PICKER_ROW_HEIGHT, Component.literal("AI Endpoint"));
+            box.setMaxLength(512);
+            box.setValue(customEndpoint);
+            box.setHint(Component.literal("键入 API 提供商文档内的 OpenAI BaseURL……")
+                    .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
+            box.setResponder(this::onCustomEndpointEdited);
+            this.endpointBox = box;
+            this.addRenderableWidget(box);
+        } else {
+            this.endpointBox = null;
+        }
+
+        // 「确认」放在按钮区最下面那一行的位置，和其它页的主按钮齐平
+        this.addRenderableWidget(Button.builder(Component.literal("确认"), btn -> next())
+                .pos(centerX - BUTTON_WIDTH / 2, buttonY)
+                .size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+    }
+
+    /**
+     * 界面语言是不是简体中文。
+     * <p>只用来决定那个「非简中时向后排」的顺序，不参与任何配置写入。
+     */
+    private static boolean isSimplifiedChinese() {
+        return "zh_cn".equalsIgnoreCase(Minecraft.getInstance().getLanguageManager().getSelected());
+    }
+
+    /** 当前语言下列表里要显示的全部项目。 */
+    private static List<Providers.PickerOption> pickerItems() {
+        return Providers.pickerOptions(isSimplifiedChinese());
+    }
+
+    /** 第 1 步的问题行 Y。 */
+    private int providerQuestionY() {
+        return titleRowY() + this.font.lineHeight + 24;
+    }
+
+    /** 列表整体的左边缘：两列（列表 + 面板）合起来在屏幕上水平居中。 */
+    private int pickerBlockLeft() {
+        int total = PICKER_LIST_WIDTH + PICKER_COLUMN_GAP + PICKER_PANEL_WIDTH;
+        return (this.width - total) / 2;
+    }
+
+    /** 列表左边缘。 */
+    private int pickerListLeft() {
+        return pickerBlockLeft();
+    }
+
+    /** 右侧面板的左边缘。 */
+    private int pickerPanelLeft() {
+        return pickerBlockLeft() + PICKER_LIST_WIDTH + PICKER_COLUMN_GAP;
+    }
+
+    /**
+     * 列表与面板共用的顶端。
+     * <p>整块（问题行 → 两列列表 → Ollama 链接 → 提示行）在「问题行 ~ 按钮上方」
+     * 这段空白里垂直居中。原来贴着问题行往下排，1280×720 下按钮上方会空出
+     * 四百多像素，整页头重脚轻。
+     */
+    private int pickerPanelTop() {
+        // 从问题行下方到提示行底部，整块的净高
+        int blockHeight = 12 + (PICKER_LIST_VISIBLE + 2)
+                + 10 + this.font.lineHeight
+                + 6 + this.font.lineHeight;
+
+        int top = providerQuestionY() + this.font.lineHeight;              // 可排区顶端
+        int bottom = this.height - BUTTON_BOTTOM_MARGIN - BUTTON_HEIGHT - 12; // 可排区底端
+        int spare = Math.max(0, bottom - top - blockHeight);
+        return top + spare / 2;
+    }
+
+    /** 列表底端（含边框）。 */
+    private int pickerListBottom() {
+        return pickerPanelTop() + PICKER_LIST_VISIBLE + 2;
+    }
+
+    /** 列表内可滚动的最大偏移。 */
+    private int pickerMaxScroll() {
+        int content = pickerItems().size() * PICKER_ROW_HEIGHT;
+        return Math.max(0, content - PICKER_LIST_VISIBLE);
+    }
+
+    /** 选中了一项：只记下来，右侧面板随之刷新。 */
+    private void onProviderPicked(String label) {
+        pickedProvider = label;
+        showProviderHint("", COLOR_NEUTRAL);
+        // 自定义与其他项的右侧内容不一样（输入框 ↔ 说明），要重建控件
+        this.rebuildWidgets();
+    }
+
+    /** 玩家改了自定义 Endpoint。 */
+    private void onCustomEndpointEdited(String text) {
+        customEndpoint = text;
+        showProviderHint("", COLOR_NEUTRAL);
+    }
+
+    /** 换一条提示；传空串表示清掉提示。 */
+    private void showProviderHint(String text, int color) {
+        this.providerHint = text;
+        this.providerHintColor = color;
+    }
+
+    /**
+     * 把这一步的选择写进 Verity 的配置。
+     * <p>只写 {@code aiProvider} 与 {@code aiEndpoint}，不碰 API Key、模型与语音设置：
+     * 那些是后面几步的事，这里提前写会把玩家原有配置改掉。
+     *
+     * @return {@code true} 表示确实写入了配置
+     */
+    private boolean commitProviderChoice() {
+        Providers.PickerOption option = Providers.pickerOption(pickedProvider);
+        if (option == null) return false;
+
+        VerityConfigManager.ConfigData data = VerityConfigManager.loadVerityConfig();
+        if (option.isCustom()) {
+            String endpoint = endpointBox != null ? endpointBox.getValue().trim() : customEndpoint.trim();
+            if (endpoint.isEmpty()) {
+                showProviderHint("请填入 AI Endpoint（OpenAI 格式）", COLOR_WARN);
+                return false;
+            }
+            customEndpoint = endpoint;
+            data.provider = Providers.OPENAI;
+            data.endpoint = endpoint;
+        } else {
+            // 「（请选择）」的 provider 为 null，走不到这里（next() 已经拦住了）
+            if (option.provider() != null) data.provider = option.provider();
+            if (option.endpoint() != null) data.endpoint = option.endpoint();
+        }
+        // 异步落盘 + 让 Verity 自己重载，不必重启
+        VerityConfigManager.saveAll(data, data.provider);
+        Log.info("引导第 1 步：提供商已切换为 " + pickedProvider
+                + "（aiProvider=" + data.provider + ", aiEndpoint=" + data.endpoint + "）");
+        return true;
+    }
+
+    /** 打开 Verity 的 Ollama 配置页；回来时回到本步，已选中的提供商不会被清掉。 */
+    private void openOllama() {
+        Screen ollama = OllamaSetupScreenZh.create(this);
+        if (ollama == null) {
+            showProviderHint("未检测到 Verity，无法打开本地 AI 设置", COLOR_WARN);
+            return;
+        }
+        Minecraft.getInstance().setScreen(ollama);
+    }
+
+    // ---------- 第 1 步的绘制 ----------
+
+    /** 画第 1 步：问题、两列列表、右侧介绍/输入框、底部 Ollama 链接、提示行。 */
+    private void renderProviderStep(GuiGraphics graphics, int mouseX, int mouseY) {
+        int centerX = this.width / 2;
+
+        graphics.drawCenteredString(this.font, Component.literal(PROVIDER_QUESTION),
+                centerX, providerQuestionY(), COLOR_BODY);
+
+        renderProviderList(graphics, mouseX, mouseY);
+        renderProviderPanel(graphics);
+        renderOllamaLink(graphics, mouseX, mouseY);
+
+        if (!providerHint.isEmpty()) {
+            graphics.drawCenteredString(this.font, Component.literal(providerHint),
+                    centerX, providerHintY(), providerHintColor);
+        }
+    }
+
+    /** 左列：可滚动的提供商列表。 */
+    private void renderProviderList(GuiGraphics graphics, int mouseX, int mouseY) {
+        int left = pickerListLeft();
+        int top = pickerPanelTop();
+        int right = left + PICKER_LIST_WIDTH;
+        int bottom = pickerListBottom();
+
+        graphics.fill(left, top, right, bottom, COLOR_LIST_BG);
+        graphics.renderOutline(left, top, PICKER_LIST_WIDTH, bottom - top, COLOR_LIST_BORDER);
+
+        List<Providers.PickerOption> items = pickerItems();
+        int scroll = Math.max(0, Math.min(pickerMaxScroll(), pickerScroll));
+        pickerScroll = scroll;
+
+        // 只画落在可视区里的行：滚动偏移可能停在半行上，首行用 -scroll % ROW 对齐
+        int first = scroll / PICKER_ROW_HEIGHT;
+        int offset = scroll % PICKER_ROW_HEIGHT;
+
+        int rowRight = right - PICKER_SCROLL_WIDTH - 1;
+        graphics.enableScissor(left + 1, top + 1, rowRight, bottom - 1);
+        for (int i = first; i < items.size(); i++) {
+            int rowTop = top + 1 + (i - first) * PICKER_ROW_HEIGHT - offset;
+            if (rowTop >= bottom - 1) break;
+            if (rowTop + PICKER_ROW_HEIGHT <= top + 1) continue;
+
+            Providers.PickerOption item = items.get(i);
+            // 还没选的时候「（请选择）」显示成选中态，与实际配置一致
+            boolean selected = item.isPlaceholder()
+                    ? !providerChosen()
+                    : item.label().equals(pickedProvider);
+
+            boolean hovered = mouseX >= left + 1 && mouseX < rowRight
+                    && mouseY >= rowTop && mouseY < rowTop + PICKER_ROW_HEIGHT;
+
+            if (selected) {
+                graphics.fill(left + 1, rowTop, rowRight,
+                        Math.min(rowTop + PICKER_ROW_HEIGHT, bottom - 1), 0x5500FF00);
+            } else if (hovered) {
+                graphics.fill(left + 1, rowTop, rowRight,
+                        Math.min(rowTop + PICKER_ROW_HEIGHT, bottom - 1), 0x30FFFFFF);
+            }
+
+            int color = selected ? COLOR_ROW_SELECTED : hovered ? 0xFFFFFFFF : 0xFFCCCCCC;
+            int textY = rowTop + (PICKER_ROW_HEIGHT - this.font.lineHeight) / 2;
+            graphics.drawString(this.font, item.label(),
+                    left + PICKER_TEXT_INSET, textY, color, false);
+        }
+        graphics.disableScissor();
+
+        // 滚动条：内容装得下时不画
+        int maxScroll = pickerMaxScroll();
+        if (maxScroll > 0) {
+            int trackX = right - PICKER_SCROLL_WIDTH - 1;
+            int trackTop = top + 1;
+            int trackBottom = bottom - 1;
+            int trackHeight = trackBottom - trackTop;
+            int contentHeight = items.size() * PICKER_ROW_HEIGHT;
+            int thumbHeight = Math.max(12, trackHeight * PICKER_LIST_VISIBLE / contentHeight);
+            int thumbY = trackTop + (int) ((long) (trackHeight - thumbHeight) * scroll / maxScroll);
+            graphics.fill(trackX, trackTop, trackX + PICKER_SCROLL_WIDTH, trackBottom, 0xFF333333);
+            graphics.fill(trackX, thumbY, trackX + PICKER_SCROLL_WIDTH, thumbY + thumbHeight, 0xFFAAAAAA);
+        }
+    }
+
+    /** 右列：选中项的介绍；选「自定义」时换成 Endpoint 输入框。 */
+    private void renderProviderPanel(GuiGraphics graphics) {
+        int left = pickerPanelLeft();
+        int top = pickerPanelTop();
+        int right = left + PICKER_PANEL_WIDTH;
+        int bottom = pickerListBottom();
+
+        graphics.fill(left, top, right, bottom, COLOR_LIST_BG);
+        graphics.renderOutline(left, top, PICKER_PANEL_WIDTH, bottom - top, COLOR_LIST_BORDER);
+
+        if (customMode()) {
+            // 输入框本身就是控件（由 super.render 绘制），这里只补一句说明。
+            // 位置从输入框下方起算，避免和输入框内的灰色斜体提示叠在一起。
+            int y = top + PICKER_ROW_HEIGHT + 12;
+            int wrapWidth = PICKER_PANEL_WIDTH - 12;
+            String note = "仅限 OpenAI 接口。地址一般以 /v1 结尾，填错会连不上。";
+            for (FormattedCharSequence line : this.font.split(Component.literal(note), wrapWidth)) {
+                if (y + this.font.lineHeight > bottom - 4) break;
+                graphics.drawString(this.font, line, left + 6, y, COLOR_NEUTRAL, false);
+                y += this.font.lineHeight + 2;
+            }
+            return;
+        }
+
+        Providers.PickerOption option = pickedProvider == null
+                ? pickerItems().get(0) : Providers.pickerOption(pickedProvider);
+        if (option == null) return;
+
+        // 介绍按面板宽度折行，从面板顶端开始往下排
+        int y = top + 6;
+        int wrapWidth = PICKER_PANEL_WIDTH - 12;
+        for (FormattedCharSequence line : this.font.split(Component.literal(option.desc()), wrapWidth)) {
+            if (y + this.font.lineHeight > bottom - 4) break;
+            graphics.drawString(this.font, line, left + 6, y, COLOR_NEUTRAL, false);
+            y += this.font.lineHeight + 2;
+        }
+
+        // 选中项的额外技术提示（如「模型尚未配置」）放在介绍下面，金色提醒
+        if (providerChosen() && option.note() != null) {
+            y += 4;
+            for (FormattedCharSequence line : this.font.split(Component.literal(option.note()), wrapWidth)) {
+                if (y + this.font.lineHeight > bottom - 4) break;
+                graphics.drawString(this.font, line, left + 6, y, COLOR_DONE, false);
+                y += this.font.lineHeight + 2;
+            }
+        }
+    }
+
+    /** 底部的「不想为 API 付费？」链接：普通文字 + 可点的绿色方括号，悬停出提示。 */
+    private void renderOllamaLink(GuiGraphics graphics, int mouseX, int mouseY) {
+        int centerX = this.width / 2;
+        int y = pickerListBottom() + 10;
+
+        String lead = "不想为 API 付费？";
+        String action = "[点击此处]";
+        String tail = "在本地运行 AI！";
+        int leadW = this.font.width(lead);
+        int actionW = this.font.width(action);
+        int tailW = this.font.width(tail);
+        int x = centerX - (leadW + actionW + tailW) / 2;
+
+        graphics.drawString(this.font, lead, x, y, COLOR_NEUTRAL, false);
+        graphics.drawString(this.font, action, x + leadW, y, COLOR_OK, false);
+        graphics.drawString(this.font, tail, x + leadW + actionW, y, COLOR_NEUTRAL, false);
+
+        // 记下可点区域，点击与悬停都用它
+        this.ollamaLinkLeft = x + leadW;
+        this.ollamaLinkRight = x + leadW + actionW;
+        this.ollamaLinkTop = y;
+        this.ollamaLinkBottom = y + this.font.lineHeight;
+
+        if (ollamaLinkHovered(mouseX, mouseY)) {
+            graphics.renderTooltip(this.font,
+                    Component.literal("配置进入本地 AI（Ollama），点击后进去本地 AI 配置"),
+                    mouseX, mouseY);
+        }
+    }
+
+    /** 鼠标是否停在「点击此处」上。 */
+    private boolean ollamaLinkHovered(int mouseX, int mouseY) {
+        return mouseX >= ollamaLinkLeft && mouseX < ollamaLinkRight
+                && mouseY >= ollamaLinkTop && mouseY < ollamaLinkBottom;
+    }
+
+    /** 提示行 Y：Ollama 链接下方。 */
+    private int providerHintY() {
+        return pickerListBottom() + 10 + this.font.lineHeight + 6;
+    }
+
+    /**
+     * 鼠标位置落在列表的哪一行上；不在列表内或落在空白处时返回 {@code null}。
+     * <p>换算方式与 {@link #renderProviderList} 的绘制保持一致：
+     * 先算行号，再用同一个滚动偏移反推这一行的屏幕位置。
+     */
+    private String pickerRowAt(double mouseX, double mouseY) {
+        int left = pickerListLeft();
+        int top = pickerPanelTop();
+        int right = left + PICKER_LIST_WIDTH - PICKER_SCROLL_WIDTH - 1;
+        int bottom = pickerListBottom();
+        if (mouseX < left + 1 || mouseX >= right || mouseY < top + 1 || mouseY >= bottom - 1) {
+            return null;
+        }
+
+        List<Providers.PickerOption> items = pickerItems();
+        int scroll = Math.max(0, Math.min(pickerMaxScroll(), pickerScroll));
+        int first = scroll / PICKER_ROW_HEIGHT;
+        int offset = scroll % PICKER_ROW_HEIGHT;
+
+        for (int i = first; i < items.size(); i++) {
+            int rowTop = top + 1 + (i - first) * PICKER_ROW_HEIGHT - offset;
+            if (mouseY >= rowTop && mouseY < rowTop + PICKER_ROW_HEIGHT) {
+                return items.get(i).label();
+            }
+            if (rowTop >= bottom) break;
+        }
+        return null;
+    }
+
+    /**
+     * 第 1 步的列表滚轮。
+     * <p>先于 {@code super} 处理：列表是自绘的，交给控件链的话会被当成「没人要」的事件。
+     */
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (position == Position.STEP && step == STEP_PROVIDER) {
+            int left = pickerListLeft();
+            int right = left + PICKER_LIST_WIDTH;
+            if (mouseX >= left && mouseX < right
+                    && mouseY >= pickerPanelTop() && mouseY < pickerListBottom()
+                    && pickerMaxScroll() > 0) {
+                // 一次滚一格（整行），半行滚动会让列表看起来在抖
+                pickerScroll = Math.max(0, Math.min(pickerMaxScroll(),
+                        pickerScroll - (int) Math.round(delta) * PICKER_ROW_HEIGHT));
+                return true;
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
     /**
      * 打开 Modpack Helper 的旧存档导入界面。
      * <p>「跳过，直接开始配置」之后回到<b>本页</b>而不是直接开始：玩家是在引导途中
@@ -395,7 +901,7 @@ public class GuideScreen extends Screen {
      */
     private void importLegacy() {
         ModpackHelperBridge.openLegacySaveImport(this, () ->
-                Minecraft.getInstance().setScreen(GuideScreen.start(onFinished)));
+                Minecraft.getInstance().setScreen(GuideScreen.startKeepingAnswers(onFinished)));
     }
 
     /**
@@ -748,7 +1254,7 @@ public class GuideScreen extends Screen {
         }
     }
 
-    /** 正文文字（演示版占位）。 */
+    /** 正文文字（演示版占位；第 1 步另有自己的渲染）。 */
     private String bodyText() {
         return switch (position) {
             case START -> "";
@@ -898,9 +1404,11 @@ public class GuideScreen extends Screen {
             drawHoverUnderline(graphics, x0, x1);
         }
 
-        // 正文：欢迎页有真实文案，其余两页还是占位
+        // 正文：欢迎页与第 1 步有真实内容，其余几页还是占位
         if (position == Position.START) {
             renderStartText(graphics);
+        } else if (position == Position.STEP && step == STEP_PROVIDER) {
+            renderProviderStep(graphics, mouseX, mouseY);
         } else {
             graphics.drawCenteredString(this.font, Component.literal(bodyText()),
                     centerX, this.height / 2 - 20, COLOR_HEADING);
@@ -923,6 +1431,19 @@ public class GuideScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
+            // 第 1 步的列表与「点击此处」是自绘的，没有控件来接管点击，先在这里判
+            if (position == Position.STEP && step == STEP_PROVIDER) {
+                if (ollamaLinkHovered((int) mouseX, (int) mouseY)) {
+                    openOllama();
+                    return true;
+                }
+                String picked = pickerRowAt(mouseX, mouseY);
+                if (picked != null) {
+                    onProviderPicked(picked);
+                    return true;
+                }
+            }
+
             int hit = hitTestStep(mouseX, mouseY);
             if (hit == HIT_FINISH) {
                 if (isFinishClickable()) {
@@ -947,5 +1468,20 @@ public class GuideScreen extends Screen {
     @Override
     public void onClose() {
         prev();
+    }
+
+    /**
+     * 第 1 步的输入框里按回车 = 点「确认」。
+     * <p>原版输入框不吃回车，不给这条路径的话玩家填完地址还得去够鼠标。
+     */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (position == Position.STEP && step == STEP_PROVIDER
+                && endpointBox != null && endpointBox.isFocused()
+                && (keyCode == 257 || keyCode == 335)) {
+            next();
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 }
