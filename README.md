@@ -127,9 +127,10 @@ src/main/java/com/cb2495/verityplus/
 │   ├── VerityConfigManager.java       读写 verity-common.toml
 │   ├── ModConfig.java                 本模组自己的开关
 │   ├── GameState.java                 引导状态（.cache/verity_plus/game_state）
-│   └── Providers.java                 AI 提供商与模型清单（暂无界面使用，见下）
+│   └── Providers.java                 AI 提供商与模型清单（引导第 1 步使用）
 ├── screen/                            独立界面（6 个类）
 │   ├── GuideScreen.java               引导教程（欢迎页 + 5 步 + 结束页）
+│   ├── EndpointValidator.java         自定义 Endpoint 的格式与可用性校验
 │   ├── ResumePrompt.java              「上次配置未完成」确认框
 │   ├── SponsorScreen.java             赞助页
 │   ├── RestartPrompt.java             重启确认
@@ -275,7 +276,9 @@ gradlew.bat :modpackhelper:runClient
 - 引导进度记在 `.cache/verity_plus/game_state`。中途关游戏，下次启动会问
   「是否继续」；想重置引导，删掉这个文件即可
 
-- 引导里目前只有 5 个占位步骤，还没接入真实的配置项
+- 第 1 步「选择提供商」已是真实功能：选中后写入 aiProvider / aiEndpoint。
+  选「自定义」时还会对填入的地址做格式检查与后台探活（GET <endpoint>/models）。
+  第 2~5 步仍是占位
 
 ---
 

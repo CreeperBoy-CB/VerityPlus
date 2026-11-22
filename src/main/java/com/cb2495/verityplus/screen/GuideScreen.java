@@ -439,8 +439,14 @@ public class GuideScreen extends Screen {
                     // 自定义网址校验没通过（红）或还在验证（黄）时不许往下走。
                     // 按住 Ctrl 可以强行通过：玩家可能就是想先配完再回来改。
                     if (endpointCheckBlocksNext() && !forceNextHeld()) {
+                        Log.debug("[Guide] CONFIRM_BLOCKED | BY=ENDPOINT_CHECK | VERDICT=" + endpointCheck.level());
                         showProviderHint(endpointCheckBlockedHint(), COLOR_WARN);
                         return;
+                    }
+                    // 按住 Ctrl 绕过了校验：记一条日志，排查时能对上是玩家主动跳过
+                    if (endpointCheckBlocksNext()) {
+                        Log.info("[Guide] CONFIRM_FORCED | BY=CTRL | VERDICT=" + endpointCheck.level()
+                                + " | INPUT=" + customEndpoint);
                     }
                     // Ctrl 强制通过时，地址还没验证过；仍然把填的内容写进配置，
                     // 否则玩家强过一步反而丢了刚输入的地址
@@ -510,8 +516,8 @@ public class GuideScreen extends Screen {
     private static final int COLOR_CHECK_WARN = 0xFFFFAA00;
     /** 正在验证：黄。 */
     private static final int COLOR_CHECK_PENDING = 0xFFFFFF55;
-    /** 「重新尝试」链接：淡蓝。 */
-    private static final int COLOR_RETRY_LINK = 0xFF55CCFF;
+    /** 「点击此处」超链接：青色。 */
+    private static final int COLOR_RETRY_LINK = 0xFF55FFFF;
 
     /** 校验图标与后面文字的间隙。图标宽度由字体实测，不再写死。 */
     private static final int CHECK_ICON_GAP = 3;
@@ -897,8 +903,8 @@ public class GuideScreen extends Screen {
         }
         // 异步落盘 + 让 Verity 自己重载，不必重启
         VerityConfigManager.saveAll(data, data.provider);
-        Log.info("引导第 1 步：提供商已切换为 " + pickedProvider
-                + "（aiProvider=" + data.provider + ", aiEndpoint=" + data.endpoint + "）");
+        Log.info("[Guide] PROVIDER_COMMITTED | LABEL=" + pickedProvider
+                + " | aiProvider=" + data.provider + " | aiEndpoint=" + data.endpoint);
         return true;
     }
 
@@ -950,13 +956,24 @@ public class GuideScreen extends Screen {
         int color = checkColor(endpointCheck);
         graphics.drawString(this.font, endpointCheck.message(), textX, y, color, false);
 
-        // 需要重试时在文字后面追加淡蓝色的「[点击此处]重新尝试」
+        // 需要重试时在文字后面追加「[点击此处]重新尝试」。
+        // 只有方括号里的「点击此处」是青色（可点），后面的「重新尝试」跟正文同色——
+        // 整段一起上色的话，玩家分不清点哪儿才有用
         if (endpointCheck.retryable()) {
             int afterText = textX + this.font.width(endpointCheck.message());
-            String link = " [点击此处]重新尝试";
-            graphics.drawString(this.font, link, afterText, y, COLOR_RETRY_LINK, false);
-            this.retryLinkLeft = afterText + this.font.width(" ");
-            this.retryLinkRight = afterText + this.font.width(link);
+            String space = " ";
+            String action = "[点击此处]";
+            String trailing = "重新尝试";
+
+            graphics.drawString(this.font, space, afterText, y, color, false);
+            int actionX = afterText + this.font.width(space);
+            graphics.drawString(this.font, action, actionX, y, COLOR_RETRY_LINK, false);
+            graphics.drawString(this.font, trailing,
+                    actionX + this.font.width(action), y, color, false);
+
+            // 可点区域只覆盖「[点击此处]」本身
+            this.retryLinkLeft = actionX;
+            this.retryLinkRight = actionX + this.font.width(action);
             this.retryLinkTop = y;
             this.retryLinkBottom = y + this.font.lineHeight;
         } else {
@@ -1521,11 +1538,31 @@ public class GuideScreen extends Screen {
     private int targetSubSteps() {
         int done = switch (position) {
             case START -> 0;
-            case STEP -> (step - 1) * SUB_STEPS + subStepProgress;
+            case STEP -> (step - 1) * SUB_STEPS
+                    + (step == STEP_PROVIDER ? providerStepSubSteps() : subStepProgress);
             case FINISH -> GameState.STEPS * SUB_STEPS;
         };
         int total = GameState.STEPS * SUB_STEPS;
         return Math.max(0, Math.min(total, done));
+    }
+
+    /**
+     * 第 1 步当前该显示的份数（0..{@link #SUB_STEPS}）。
+     * <ul>
+     *   <li>还没选（「（请选择）」）→ 0；</li>
+     *   <li>选了预置提供商 → 2 份；</li>
+     *   <li>选了「自定义」→ 1 份，网址校验通过后升到 2 份。</li>
+     * </ul>
+     * <p>用 {@code 2} 而不是满格 {@code 3}：这一步真正结束时才该填满，
+     * 选了提供商只是「填了一半」，进度条不该提前跑到底。
+     */
+    private int providerStepSubSteps() {
+        if (!providerChosen()) return 0;
+        if (!customMode()) return 2;
+        // 自定义：填了地址算 1 份，地址验证通过再升到 2 份
+        boolean hasText = !(endpointBox != null ? endpointBox.getValue() : customEndpoint).trim().isEmpty();
+        if (!hasText) return 1;
+        return endpointCheck != null && endpointCheck.level() == EndpointValidator.Level.OK ? 2 : 1;
     }
 
     /**

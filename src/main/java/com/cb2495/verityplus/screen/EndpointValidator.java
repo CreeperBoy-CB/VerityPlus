@@ -87,6 +87,7 @@ final class EndpointValidator {
             return null;
         }
         if (!text.startsWith("https://")) {
+            Log.debug("[EndpointCheck] FORMAT=FAILED | REASON=NO_HTTPS_PREFIX | INPUT=" + text);
             return new Result(Level.ERROR, "网址不符合格式要求，正确格式：https://……", false);
         }
         String host = text.substring("https://".length());
@@ -94,6 +95,7 @@ final class EndpointValidator {
         int slash = host.indexOf('/');
         if (slash >= 0) host = host.substring(0, slash);
         if (host.isEmpty() || host.startsWith(".") || host.endsWith(".")) {
+            Log.debug("[EndpointCheck] FORMAT=FAILED | REASON=INVALID_HOST | INPUT=" + text);
             return new Result(Level.ERROR, "网址不符合格式要求，正确格式：https://……", false);
         }
         return null;
@@ -139,7 +141,7 @@ final class EndpointValidator {
             try {
                 result = probe(endpoint);
             } catch (RuntimeException e) {
-                Log.warn("检查 Endpoint 时出错: " + e);
+                Log.warn("[EndpointCheck] PROBE=CRASHED | ERROR=" + e);
                 result = new Result(Level.WARN, "无法判断该网址是否是 OpenAI 格式", false);
             }
             Result finalResult = result;
@@ -153,11 +155,18 @@ final class EndpointValidator {
 
     /** 真正发请求并解释响应。跑在后台线程。 */
     private static Result probe(String endpoint) {
+        String url = modelsUrl(endpoint);
+        Log.debug("[EndpointCheck] TEST=" + url);
+
         HttpURLConnection conn = null;
+        long startedAt = System.nanoTime();
         try {
-            URL url = new URL(modelsUrl(endpoint));
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("HEAD");
+            URL target = new URL(url);
+            conn = (HttpURLConnection) target.openConnection();
+            // 用 GET 而不是 HEAD：不少网关（例如 SiliconFlow）对 HEAD 直接回 404，
+            // 而同样的地址 GET 能正常返回 JSON。HEAD 只是省流量的手段，
+            // 判断「地址能不能当 OpenAI 接口用」用 GET 才准确。
+            conn.setRequestMethod("GET");
             conn.setConnectTimeout(TIMEOUT_MS);
             conn.setReadTimeout(TIMEOUT_MS);
             // 不跟随重定向：3xx 本身就是「这不是个 API」的信号之一
@@ -165,22 +174,106 @@ final class EndpointValidator {
             // 有些服务器对没有 UA 的请求直接 403，带一个常见的值更稳
             conn.setRequestProperty("User-Agent", "VerityPlus-EndpointCheck/1.0");
             conn.setRequestProperty("Accept", "application/json");
+            // 只要前 1 个字节：模型列表可能很大，我们只需要响应头，
+            // 不该为了一次探活真把整份 JSON 拉下来。
+            // 即使服务器不支持 Range、回的是 200 全量，下面也只读一小段就断开。
+            conn.setRequestProperty("Range", "bytes=0-0");
 
             int code = conn.getResponseCode();
-            return interpret(code, conn.getContentType());
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            String contentType = conn.getContentType();
+            String location = conn.getHeaderField("Location");
+            String server = conn.getHeaderField("Server");
+
+            // 416（Range 无法满足）说明这个地址是个可访问的资源，只是不接受该区间。
+            // 有些网关对 Range 处理得不好，退回成按 GET 成功对待。
+            Result result = interpret(code == 416 ? 200 : code, contentType);
+
+            // 一行一条：测试地址、连通性、类型，再加耗时与关键响应头。
+            // 通过的请求只写 debug（正常使用时不该每填一次地址就刷一行），
+            // 有问题的提到 info，保证玩家反馈「网址明明是好的却报错」时日志里一定有线索。
+            StringBuilder line = new StringBuilder("[EndpointCheck] TEST=").append(url)
+                    .append(" | CONNECTIVITY=").append(code).append('-').append(statusText(code))
+                    .append(" | TYPE=").append(contentType == null ? "(none)" : contentType)
+                    .append(" | METHODS=").append(allowMethods(conn))
+                    .append(" | MS=").append(elapsedMs)
+                    .append(" | VERDICT=").append(result.level());
+            if (server != null) line.append(" | SERVER=").append(server);
+            // 3xx 只有跟着 Location 去访问才知道真实目标，这条对排查很有用
+            if (location != null) line.append(" | LOCATION=").append(location);
+            if (!result.message().isEmpty()) {
+                // 结论原文是中文界面文案，日志里只留等级，避免控制台乱码
+                line.append(" | BLOCKS=").append(result.blocksNext());
+            }
+
+            if (result.level() == Level.OK) {
+                Log.debug(line.toString());
+            } else {
+                Log.info(line.toString());
+            }
+            return result;
         } catch (java.net.UnknownHostException e) {
-            // 域名解析失败
-            return new Result(Level.WARN, "连接失败，请检查网络连接", true);
+            return reportConnectFailure("DNS_RESOLVE_FAILED", url, startedAt, e);
         } catch (java.net.SocketTimeoutException e) {
-            return new Result(Level.WARN, "连接失败，请检查网络连接", true);
+            return reportConnectFailure("TIMEOUT_" + TIMEOUT_MS + "MS", url, startedAt, e);
         } catch (java.net.ConnectException e) {
-            return new Result(Level.WARN, "连接失败，请检查网络连接", true);
+            return reportConnectFailure("CONNECT_REFUSED", url, startedAt, e);
         } catch (java.io.IOException e) {
             // 连接重置、SSL 握手失败等
-            return new Result(Level.WARN, "连接失败，请检查网络连接", true);
+            return reportConnectFailure("IO_" + e.getClass().getSimpleName(), url, startedAt, e);
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /**
+     * 连接阶段失败：写一条英文日志（原因 + 地址 + 耗时 + 异常），并给出可重试的结论。
+     * <p>不把异常栈打出来——这类失败大多是玩家本机网络问题，
+     * 一行原因加一行地址就足够定位，栈会淹没日志。
+     */
+    private static Result reportConnectFailure(String reason, String url, long startedAt, Exception cause) {
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+        Log.info("[EndpointCheck] TEST=" + url
+                + " | CONNECTIVITY=FAILED | REASON=" + reason
+                + " | MS=" + elapsedMs
+                + " | VERDICT=" + Level.WARN
+                + " | ERROR=" + cause);
+        return new Result(Level.WARN, "连接失败，请检查网络连接", true);
+    }
+
+    /** HTTP 状态码对应的标准短语，例如 200 → OK、404 → Not Found。 */
+    private static String statusText(int code) {
+        return switch (code) {
+            case 200 -> "OK";
+            case 201 -> "Created";
+            case 204 -> "No Content";
+            case 301 -> "Moved Permanently";
+            case 302 -> "Found";
+            case 304 -> "Not Modified";
+            case 307 -> "Temporary Redirect";
+            case 308 -> "Permanent Redirect";
+            case 400 -> "Bad Request";
+            case 401 -> "Unauthorized";
+            case 403 -> "Forbidden";
+            case 404 -> "Not Found";
+            case 405 -> "Method Not Allowed";
+            case 429 -> "Too Many Requests";
+            case 500 -> "Internal Server Error";
+            case 502 -> "Bad Gateway";
+            case 503 -> "Service Unavailable";
+            case 504 -> "Gateway Timeout";
+            default -> code < 300 ? "Success" : code < 400 ? "Redirect" : code < 500 ? "Client Error" : "Server Error";
+        };
+    }
+
+    /**
+     * 响应头里的 {@code Allow}（服务端认可的方法）。
+     * <p>有些网关对 HEAD 回 405，但 {@code Allow} 里写着 POST——这条能直接说明
+     * 「地址是对的，只是这个位置不支持 HEAD」，比只看到一个 405 有用得多。
+     */
+    private static String allowMethods(HttpURLConnection conn) {
+        String allow = conn.getHeaderField("Allow");
+        return allow == null || allow.isBlank() ? "(n/a)" : allow.trim();
     }
 
     /**
