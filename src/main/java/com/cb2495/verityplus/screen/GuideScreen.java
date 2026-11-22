@@ -1,5 +1,6 @@
 package com.cb2495.verityplus.screen;
 
+import com.cb2495.verityplus.client.ModpackHelperBridge;
 import com.cb2495.verityplus.config.GameState;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -8,23 +9,29 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraftforge.fml.ModList;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 引导教程界面（演示版）。
+ * 引导教程界面。
  *
  * <h3>七页</h3>
  * <pre>
  * 欢迎页 → 第 1 步 → … → 第 5 步 → 结束页
  * </pre>
- * 正文目前都是占位文字（「这是欢迎界面」「这是引导教程第 x 步」「配置已结束」），
- * 用来先把<b>流程</b>跑通：状态怎么记、退出后回到哪一页、跳过怎么收尾。
- * 每一页的真实内容（选提供商、填 Key 等）之后再往里填。
+ * 欢迎页已有真实文案（见 {@link #renderStartText}）；中间 5 步与结束页仍是占位文字
+ * （「这是引导教程第 x 步」「配置已结束」），真实内容（选提供商、填 Key 等）之后再往里填。
  *
  * <h3>按钮</h3>
  * <ul>
  *   <li>左上角「←」—— 每一页都显示，回到上一页。欢迎页上等同「跳过」；</li>
  *   <li>主按钮 —— 欢迎页是「开始」，中间步骤是「继续」，结束页是「完成」；</li>
- *   <li>「跳过」—— 只在欢迎页显示，放在主按钮下方，直接结束引导。</li>
+ *   <li>「跳过」—— 只在欢迎页显示，放在主按钮下方；</li>
+ *   <li>「导入旧存档」—— 只在欢迎页、且装了 Modpack Helper 时显示，
+ *       放在「跳过」下方，打开那边的旧存档导入界面。</li>
  * </ul>
  *
  * <h3>与状态文件的关系</h3>
@@ -41,6 +48,19 @@ public class GuideScreen extends Screen {
     private static final int BUTTON_GAP = 5;
     /** 按钮行距离屏幕底部的边距。 */
     private static final int BUTTON_BOTTOM_MARGIN = 40;
+
+    // ---------- 欢迎页正文 ----------
+    /** 正文块里每行之间的间隙（在 {@code font.lineHeight} 之上额外加的空隙）。 */
+    private static final int TEXT_LINE_GAP = 4;
+    /** 正文按窗口宽度折行时，左右两边保留的空白。 */
+    private static final int TEXT_SIDE_MARGIN = 40;
+
+    /** 欢迎语的金色。 */
+    private static final int COLOR_HEADING = 0xFFFFD700;
+    /** 正文主句的白色。 */
+    private static final int COLOR_BODY = 0xFFFFFFFF;
+    /** 次要说明（导入旧存档、跳过按钮）的灰色。 */
+    private static final int COLOR_HINT = 0xFFAAAAAA;
 
     /** 左上角小返回按钮的尺寸，比普通按钮矮一些，不抢视觉重心。 */
     private static final int BACK_BUTTON_WIDTH = 20;
@@ -270,17 +290,28 @@ public class GuideScreen extends Screen {
         };
 
         int centerX = (this.width - BUTTON_WIDTH) / 2;
-        // 「跳过」只在欢迎页出现，放在主按钮下方；
-        // 有它时主按钮上移一行，让两行作为整体视觉居中
+        // 欢迎页的按钮竖排成一列（从上到下：开始 → 跳过 → 导入旧存档），
+        // 整列以 buttonY 为底向上排，这样按钮增删都不会让这一组跑偏
         boolean showSkip = position == Position.START;
-        int mainY = showSkip ? buttonY - (BUTTON_HEIGHT + BUTTON_GAP) : buttonY;
+        int mainY = showSkip
+                ? buttonY - (BUTTON_HEIGHT + BUTTON_GAP) * (1 + (canImportLegacy() ? 1 : 0))
+                : buttonY;
 
         this.addRenderableWidget(Button.builder(mainLabel, btn -> next())
                 .pos(centerX, mainY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
 
         if (showSkip) {
+            // 原版按钮本身就是灰底，这里把文字改成白色
             this.addRenderableWidget(Button.builder(
-                            Component.literal("跳过").withStyle(ChatFormatting.GRAY), btn -> skip())
+                            Component.literal("跳过").withStyle(ChatFormatting.WHITE), btn -> skip())
+                    .pos(centerX, buttonY - BUTTON_HEIGHT - BUTTON_GAP)
+                    .size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+        }
+
+        // 「导入旧存档」由 Modpack Helper 提供；没装那个模组时这一项连文案都不该出现
+        if (position == Position.START && canImportLegacy()) {
+            this.addRenderableWidget(Button.builder(
+                            Component.literal("导入旧存档").withStyle(ChatFormatting.GRAY), btn -> importLegacy())
                     .pos(centerX, buttonY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
         }
 
@@ -354,6 +385,17 @@ public class GuideScreen extends Screen {
 
     private void skip() {
         finish();
+    }
+
+    /**
+     * 打开 Modpack Helper 的旧存档导入界面。
+     * <p>「跳过，直接开始配置」之后回到<b>本页</b>而不是直接开始：玩家是在引导途中
+     * 顺路导存档，引导的进度不该因此丢掉。
+     * <p>调用失败（没装 / 版本对不上）时什么都不做，按钮的悬停提示已经说清楚了。
+     */
+    private void importLegacy() {
+        ModpackHelperBridge.openLegacySaveImport(this, () ->
+                Minecraft.getInstance().setScreen(GuideScreen.start(onFinished)));
     }
 
     /**
@@ -709,10 +751,106 @@ public class GuideScreen extends Screen {
     /** 正文文字（演示版占位）。 */
     private String bodyText() {
         return switch (position) {
-            case START -> "这是欢迎界面";
+            case START -> "";
             case STEP -> "这是引导教程第 " + step + " 步";
             case FINISH -> "配置已结束";
         };
+    }
+
+    // ---------- 欢迎页正文 ----------
+
+    /**
+     * 「导入旧存档」是不是该出现。
+     * <p>这条提示与按钮都只属于欢迎页，而且需要 Modpack Helper 提供导入界面。
+     */
+    private static boolean canImportLegacy() {
+        return ModpackHelperBridge.isAvailable();
+    }
+
+    /**
+     * 欢迎语：报「装的是什么」。
+     * <ul>
+     *   <li>装了 Modpack Helper —— 玩家装的是整个整合包，报整合包的版本号；</li>
+     *   <li>没装 —— 只装了这个模组，报本模组的版本号与作者。</li>
+     * </ul>
+     * 版本号从 mods.toml 现取，不写死在代码里。
+     */
+    private static String welcomeLine() {
+        ModList mods = ModList.get();
+        if (ModpackHelperBridge.isAvailable()) {
+            return "欢迎您安装 CB2495 的 Verity 整合包 " + modVersion(mods, ModpackHelperBridge.MODID);
+        }
+        return "欢迎您安装 Verity Plus " + modVersion(mods, com.cb2495.verityplus.VerityPlus.MODID)
+                + "（作者：CB2495）";
+    }
+
+    /** 取某个模组的版本号；取不到时给一个不会误导人的占位。 */
+    private static String modVersion(ModList mods, String modId) {
+        return mods.getModContainerById(modId)
+                .map(container -> container.getModInfo().getVersion().toString())
+                .orElse("?");
+    }
+
+    /**
+     * 欢迎页正文的一行：文字 + 颜色。
+     *
+     * @param text  这一行的原文（可能被折成多行显示）
+     * @param color ARGB 颜色
+     */
+    private record BodyLine(String text, int color) {}
+
+    /**
+     * 欢迎页正文的每一行。
+     * <p>第一行是欢迎语（金色），后面是这个页面的说明；
+     * 讲「导入旧存档」的那行只在装了 Modpack Helper 时才有，
+     * 讲「跳过」的那行什么时候都在。
+     */
+    private List<BodyLine> startBodyLines() {
+        List<BodyLine> lines = new ArrayList<>();
+        lines.add(new BodyLine(welcomeLine(), COLOR_HEADING));
+        lines.add(new BodyLine("跟随此引导快捷配置 Verity 的 AI 大脑", COLOR_BODY));
+        if (canImportLegacy()) {
+            lines.add(new BodyLine("若你有旧版整合包的存档，可以点击下方「导入旧存档」按钮导入旧版存档",
+                    COLOR_HINT));
+        }
+        lines.add(new BodyLine("如果你足够熟悉 Verity 的配置流程，并愿意手动配置，"
+                + "可点击「跳过」按钮进入游戏手动配置", COLOR_HINT));
+        return lines;
+    }
+
+    /**
+     * 画欢迎页正文（全部同一字号，欢迎语用金色区分），整块在
+     * 「进度条下方 ~ 按钮上方」这段空白里垂直居中，而不是死钉在屏幕正中——
+     * 这样按钮多了几行也不会把文字压住。
+     */
+    private void renderStartText(GuiGraphics graphics) {
+        int centerX = this.width / 2;
+        int wrapWidth = Math.max(40, this.width - TEXT_SIDE_MARGIN * 2);
+
+        // 先把所有行折好，才知道整块有多高；颜色跟着行走进来，折出来的几段共用
+        List<Integer> colors = new ArrayList<>();
+        List<FormattedCharSequence> rows = new ArrayList<>();
+        for (BodyLine line : startBodyLines()) {
+            for (FormattedCharSequence piece : this.font.split(Component.literal(line.text()), wrapWidth)) {
+                rows.add(piece);
+                colors.add(line.color());
+            }
+        }
+
+        int blockHeight = rows.isEmpty()
+                ? 0
+                : rows.size() * this.font.lineHeight + (rows.size() - 1) * TEXT_LINE_GAP;
+
+        // 上边界：欢迎页进度条不展开，从标题行下方算起；
+        // 下边界：三行按钮列的顶端（与 init 里的排法一致，这里是同一条公式）
+        int top = titleRowY() + this.font.lineHeight + 16;
+        int bottom = this.height - BUTTON_BOTTOM_MARGIN - (BUTTON_HEIGHT + BUTTON_GAP) * 3;
+        int y = Math.max(top, top + (bottom - top - blockHeight) / 2);
+
+        for (int i = 0; i < rows.size(); i++) {
+            graphics.drawCenteredString(this.font, rows.get(i), centerX, y, colors.get(i));
+            y += this.font.lineHeight + TEXT_LINE_GAP;
+        }
     }
 
     /** 右下角的页序指示；欢迎页与结束页没有「第几步」的概念，按位置显示。 */
@@ -760,9 +898,13 @@ public class GuideScreen extends Screen {
             drawHoverUnderline(graphics, x0, x1);
         }
 
-        // 正文（演示版）：大字居中，先把位置占住
-        graphics.drawCenteredString(this.font, Component.literal(bodyText()),
-                centerX, this.height / 2 - 20, 0xFFFFD700);
+        // 正文：欢迎页有真实文案，其余两页还是占位
+        if (position == Position.START) {
+            renderStartText(graphics);
+        } else {
+            graphics.drawCenteredString(this.font, Component.literal(bodyText()),
+                    centerX, this.height / 2 - 20, COLOR_HEADING);
+        }
 
         super.render(graphics, mouseX, mouseY, partialTick);
     }
