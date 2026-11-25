@@ -1703,8 +1703,12 @@ public class GuideScreen extends Screen {
     /** {@link #hitTestStep} 表示命中「完成」标记的返回值。 */
     private static final int HIT_FINISH = -2;
 
-    /** 第 {@code index} 个步骤的标签文字（演示版占位：第 x 步）。 */
+    /**
+     * 第 {@code index} 个步骤（0 起算）在进度条上的标签文字。
+     * <p>第 1 步已经有真实内容，用它的主题名；其余步骤还是占位，继续显示「第 x 步」。
+     */
     private static String tickLabel(int index) {
+        if (index + 1 == STEP_PROVIDER) return "选择提供商";
         return "第" + (index + 1) + "步";
     }
 
