@@ -342,9 +342,24 @@ public class GuideScreen extends Screen {
         // 欢迎页的按钮竖排成一列（从上到下：开始 → 跳过 → 导入旧存档），
         // 整列以 buttonY 为底向上排，这样按钮增删都不会让这一组跑偏
         boolean showSkip = position == Position.START;
-        int mainY = showSkip
-                ? buttonY - (BUTTON_HEIGHT + BUTTON_GAP) * (1 + (canImportLegacy() ? 1 : 0))
-                : buttonY;
+        boolean showImport = position == Position.START && canImportLegacy();
+
+        // 欢迎页的按钮竖排成一列（自上而下：开始 → 跳过 → 导入旧存档）。
+        // 用固定的三行坐标，而不是互相减来减去：
+        // 导入旧存档在最底行，跳过在它上面一行，开始在再上面。
+        // 这样按钮增删时只需改一个常量，不会再出现两个按钮算到同一个 y。
+        int importY = buttonY;
+        int skipY = buttonY - (BUTTON_HEIGHT + BUTTON_GAP);
+        int startY = buttonY - (BUTTON_HEIGHT + BUTTON_GAP) * 2;
+
+        // 没装 Modpack Helper 时最底下没有「导入旧存档」，整列往上补一行，
+        // 让「跳过」落到最底行、「开始」落在它上面
+        if (showSkip && !showImport) {
+            skipY = buttonY;
+            startY = buttonY - (BUTTON_HEIGHT + BUTTON_GAP);
+        }
+
+        int mainY = showSkip ? startY : buttonY;
 
         this.addRenderableWidget(Button.builder(mainLabel, btn -> next())
                 .pos(centerX, mainY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
@@ -353,15 +368,15 @@ public class GuideScreen extends Screen {
             // 原版按钮本身就是灰底，这里把文字改成白色
             this.addRenderableWidget(Button.builder(
                             Component.literal("跳过").withStyle(ChatFormatting.WHITE), btn -> skip())
-                    .pos(centerX, buttonY - BUTTON_HEIGHT - BUTTON_GAP)
+                    .pos(centerX, skipY)
                     .size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
         }
 
         // 「导入旧存档」由 Modpack Helper 提供；没装那个模组时这一项连文案都不该出现
-        if (position == Position.START && canImportLegacy()) {
+        if (showImport) {
             this.addRenderableWidget(Button.builder(
                             Component.literal("导入旧存档").withStyle(ChatFormatting.GRAY), btn -> importLegacy())
-                    .pos(centerX, buttonY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+                    .pos(centerX, importY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
         }
 
         // 第 1 步自己的控件：提供商下拉框、Ollama 入口、自定义 Endpoint 输入框

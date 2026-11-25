@@ -250,30 +250,42 @@ public final class Providers {
 
     /**
      * 按界面语言排好的列表项。
-     * <p>「非简中时向后排」的三项（GROQ / ChatGPT / Gemini）在简体中文环境里排在
-     * DeepSeek / 智谱 之前，其余语言里挪到它们后面——国内不方便直接用。
-     * 判定只看界面语言：玩家把游戏切成英文通常也意味着在能用它们的环境里。
-     * <p>OpenRouter 与 Mistral 按需求固定排在 Gemini 之后，不参与调整。
+     *
+     * <p><b>简体中文</b>：按「国内可直接用」的梯度分组排序——
+     * <ol>
+     *   <li>国内提供商：DeepSeek、智谱；</li>
+     *   <li>国内可能无法稳定访问：GROQ、OpenRouter；</li>
+     *   <li>国内无法正常访问：ChatGPT、Gemini、Mistral；</li>
+     *   <li>自定义。</li>
+     * </ol>
+     * 组内保持 {@link #pickerTemplate()} 里的相对顺序。
+     *
+     * <p><b>其它语言</b>：保持 {@link #pickerTemplate()} 的原始顺序
+     * （GROQ 在第 2 位），不做任何调整。
      *
      * @param simplifiedChinese 界面语言是否是简体中文
      */
     public static List<PickerOption> pickerOptions(boolean simplifiedChinese) {
         List<PickerOption> all = pickerTemplate();
+        // 非简中就是模板原样。复制一份再返回，避免调用方改动时污染后续查询
+        if (!simplifiedChinese) return new ArrayList<>(all);
+
         PickerOption placeholder = all.get(0);
-        List<PickerOption> cn = List.of(all.get(2), all.get(3));             // DeepSeek, 智谱
-        List<PickerOption> foreign = List.of(all.get(1), all.get(4), all.get(5)); // GROQ, ChatGPT, Gemini
-        List<PickerOption> tail = List.of(all.get(6), all.get(7), all.get(8));    // OpenRouter, Mistral, 自定义
+        // 组 1：国内可直接用
+        List<PickerOption> local = List.of(all.get(2), all.get(3));          // DeepSeek, 智谱
+        // 组 2：国内可能无法稳定访问
+        List<PickerOption> unstable = List.of(all.get(1), all.get(6));       // GROQ, OpenRouter
+        // 组 3：国内无法正常访问
+        List<PickerOption> blocked = List.of(all.get(4), all.get(5), all.get(7)); // ChatGPT, Gemini, Mistral
+        // 组 4：自定义
+        List<PickerOption> custom = List.of(all.get(8));
 
         List<PickerOption> options = new ArrayList<>();
         options.add(placeholder);
-        if (simplifiedChinese) {
-            options.addAll(foreign);
-            options.addAll(cn);
-        } else {
-            options.addAll(cn);
-            options.addAll(foreign);
-        }
-        options.addAll(tail);
+        options.addAll(local);
+        options.addAll(unstable);
+        options.addAll(blocked);
+        options.addAll(custom);
         return options;
     }
 
