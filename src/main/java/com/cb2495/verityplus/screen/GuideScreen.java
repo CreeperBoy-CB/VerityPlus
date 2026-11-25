@@ -138,6 +138,72 @@ public class GuideScreen extends Screen {
     private static String customEndpoint = "";
 
     /**
+     * 第 2 步填的 API Key。同样做成静态：这一步翻到第 3 步再翻回来，
+     * 刚填的 Key 不该被清掉。
+     * <p>只在内存里保存，落盘由「验证通过」或「点继续」触发。
+     */
+    private static String apiKeyText = "";
+
+    /**
+     * 第 2 步的校验结论。
+     * <p>做成静态而不只跟着界面实例走：翻页会重建界面，若结论跟着实例，
+     * 从第 3 步翻回第 2 步时边框颜色和结论行会一片空白，
+     * 玩家得再等两秒才知道这个 Key 到底行不行。
+     */
+    private static ApiKeyValidator.Result apiKeyCheck = null;
+
+    /**
+     * Key 上一次被接受时的内容。
+     * <p>用来判断「结论还能不能代表现在输入框里的内容」：
+     * 玩家在绿了之后又删掉几个字符，那份绿色的结论就该失效，
+     * 不能继续拿它当权限放行「继续」。
+     */
+    private static String checkedApiKey = null;
+
+    /**
+     * 「请先填入 API Key！」这句红字的到期时刻（毫秒）。
+     * <p>5 秒后自己消失，不需要玩家去点一下才清掉。
+     */
+    private static long missingKeyHintUntilMs = 0L;
+
+    /**
+     * 第 2 步的 API Key 输入框。
+     * <p>它只在第 2 步存在，其余页恒为 {@code null}。
+     */
+    private EditBox apiKeyBox;
+
+    /**
+     * 第 2 步里玩家是否已经点过「获取！」打开过开放平台。
+     * <p>做成静态：进度条 +1 的效果翻页回来还得认账。
+     */
+    private static boolean registerLinkOpened = false;
+
+    /** 第 2 步输入框右边那个功能按钮（📋 粘贴 / × 清空）的引用。 */
+    private Button keyActionButton;
+
+    /** 主按钮（开始 / 确认 / 继续 / 完成）的引用：第 2 步要按 Key 的结论置灰。 */
+    private Button mainButton;
+
+    /** 等到点要发起的 Key 校验的时间戳；{@code <= 0} 表示当前没有排队的校验。 */
+    private long pendingKeyCheckAt = 0L;
+    /** 排队那次校验的代号，用于丢弃过期结果。 */
+    private int pendingKeyGeneration = -1;
+    /** 排队那次校验要用的 Base URL。 */
+    private String pendingKeyBaseUrl = "";
+    /** 排队那次校验要用的 Key。 */
+    private String pendingKeyValue = "";
+    /** 排队那次校验是否走 Gemini 的 {@code ?key=} 鉴权。 */
+    private boolean pendingKeyGemini = false;
+
+    /**
+     * 第 2 步里几个「[点击此处]」的可点区域。
+     * <p>每帧渲染时重算，点击时按顺序比对；没有画出来的链接区域是空的，
+     * 所以不会出现「看不见却点得到」的情况。
+     */
+    private int[] keyStatusLink = new int[4];
+    private int[] keyRegisterLink = new int[4];
+
+    /**
      * 结束引导后要做的事（回到来处）；为 {@code null} 表示直接关掉回游戏。
      * <p>用回调而不是直接引用 Verity 的配置界面：让依赖保持单向
      * {@code client → screen}，{@code GuideScreen} 不必知道配置界面怎么构造。
@@ -260,6 +326,11 @@ public class GuideScreen extends Screen {
     private static void resetStepAnswers() {
         pickedProvider = null;
         customEndpoint = "";
+        apiKeyText = "";
+        apiKeyCheck = null;
+        checkedApiKey = null;
+        missingKeyHintUntilMs = 0L;
+        registerLinkOpened = false;
     }
     /** 第 {@code step} 步（1 起算）。 */
     public static GuideScreen step(int step, Runnable onFinished) {
@@ -371,8 +442,10 @@ public class GuideScreen extends Screen {
 
         int mainY = showSkip ? startY : buttonY;
 
-        this.addRenderableWidget(Button.builder(mainLabel, btn -> next())
-                .pos(centerX, mainY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+        Button main = Button.builder(mainLabel, btn -> next())
+                .pos(centerX, mainY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build();
+        this.mainButton = main;
+        this.addRenderableWidget(main);
 
         if (showSkip) {
             // 原版按钮本身就是灰底，这里把文字改成白色
@@ -392,6 +465,11 @@ public class GuideScreen extends Screen {
         // 第 1 步自己的控件：提供商下拉框、Ollama 入口、自定义 Endpoint 输入框
         if (position == Position.STEP && step == STEP_PROVIDER) {
             initProviderPicker(buttonY);
+        }
+
+        // 第 2 步自己的控件：API Key 输入框、右侧的「粘贴 / 清空」按钮
+        if (position == Position.STEP && step == STEP_API_KEY) {
+            initApiKeyStep(buttonY);
         }
 
         // 进度条要等点了「开始」才出现；欢迎页上它一直处于未展开状态。
@@ -477,8 +555,8 @@ public class GuideScreen extends Screen {
                     // 否则玩家强过一步反而丢了刚输入的地址
                     if (!commitProviderChoice()) return;
                 }
-                if (step >= GameState.STEPS) {
-                    mc.setScreen(GuideScreen.finish(onFinished));
+                if (step == STEP_API_KEY && !commitApiKey()) return;
+                if (step >= GameState.STEPS) {                    mc.setScreen(GuideScreen.finish(onFinished));
                 } else {
                     mc.setScreen(GuideScreen.step(step + 1, onFinished));
                 }
@@ -495,6 +573,12 @@ public class GuideScreen extends Screen {
 
     /** 第 1 步的步号。 */
     private static final int STEP_PROVIDER = 1;
+
+    /** 第 2 步的步号：填 API Key。 */
+    private static final int STEP_API_KEY = 2;
+
+    /** 第 1 步 Endpoint 输入框的提示文字（原版提示与聚焦时补画的那份共用）。 */
+    private static final String ENDPOINT_HINT = "请填入 AI 提供商文档中的AI Endpoint";
 
     /** 第 1 步的标题。 */
     private static final String PROVIDER_QUESTION = "首先，请选择 Verity AI 大脑的提供商";
@@ -616,11 +700,9 @@ public class GuideScreen extends Screen {
 
     /**
      * 结论里「[点击此处]重新尝试」的可点区域，渲染时更新、点击时读取。
+     * <p>四个元素依次是 {@code left, right, top, bottom}，与第 2 步的几个链接同一套存法。
      */
-    private int retryLinkLeft = 0;
-    private int retryLinkRight = 0;
-    private int retryLinkTop = 0;
-    private int retryLinkBottom = 0;
+    private final int[] retryLink = new int[4];
 
     /**
      * 重新安排一次校验。
@@ -706,9 +788,7 @@ public class GuideScreen extends Screen {
 
     /** 点击是否落在「[点击此处]重新尝试」上。 */
     private boolean retryLinkClicked(double mouseX, double mouseY) {
-        return retryLinkRight > retryLinkLeft
-                && mouseX >= retryLinkLeft && mouseX < retryLinkRight
-                && mouseY >= retryLinkTop && mouseY < retryLinkBottom;
+        return linkHit(retryLink, mouseX, mouseY);
     }
 
     /** 已经选好了提供商（「（请选择）」不算）。 */
@@ -738,8 +818,10 @@ public class GuideScreen extends Screen {
                     PICKER_ROW_HEIGHT, Component.literal("AI Endpoint"));
             box.setMaxLength(512);
             box.setValue(customEndpoint);
-            box.setHint(Component.literal("请填入 AI 提供商文档中的AI Endpoint")
+            box.setHint(Component.literal(ENDPOINT_HINT)
                     .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
+            // 聚焦且为空时由 GreenBorderedEditBox 补画同一句（原版只在未聚焦时画提示）
+            GreenBorderedEditBox.setFocusedHint(ENDPOINT_HINT);
             box.setResponder(this::onCustomEndpointEdited);
             this.endpointBox = box;
             this.addRenderableWidget(box);
@@ -976,34 +1058,9 @@ public class GuideScreen extends Screen {
         // 显示在「自定义」那一项的正下方，而不是屏幕底部的提示行：
         // 玩家刚填完地址，视线就在那一行上，报错紧跟其后最容易被看到
         int y = endpointCheckY();
-        int textX = drawCheckMark(graphics, pickerLeft(), y);
-
-        int color = checkColor(endpointCheck);
-        graphics.drawString(this.font, endpointCheck.message(), textX, y, color, false);
-
-        // 需要重试时在文字后面追加「[点击此处]重新尝试」。
-        // 只有方括号里的「点击此处」是青色（可点），后面的「重新尝试」跟正文同色——
-        // 整段一起上色的话，玩家分不清点哪儿才有用
-        if (endpointCheck.retryable()) {
-            int afterText = textX + this.font.width(endpointCheck.message());
-            String space = " ";
-            String action = "[点击此处]";
-            String trailing = "重新尝试";
-
-            graphics.drawString(this.font, space, afterText, y, color, false);
-            int actionX = afterText + this.font.width(space);
-            graphics.drawString(this.font, action, actionX, y, COLOR_RETRY_LINK, false);
-            graphics.drawString(this.font, trailing,
-                    actionX + this.font.width(action), y, color, false);
-
-            // 可点区域只覆盖「[点击此处]」本身
-            this.retryLinkLeft = actionX;
-            this.retryLinkRight = actionX + this.font.width(action);
-            this.retryLinkTop = y;
-            this.retryLinkBottom = y + this.font.lineHeight;
-        } else {
-            resetRetryLink();
-        }
+        drawStatusLine(graphics, pickerLeft(), y,
+                iconFor(endpointCheck), checkColor(endpointCheck), endpointCheck.message(),
+                endpointCheck.retryable() ? "重新尝试" : null, retryLink);
     }
 
     /**
@@ -1020,10 +1077,532 @@ public class GuideScreen extends Screen {
 
     /** 把重试链接的区域清空，避免上一帧的坐标残留导致误点。 */
     private void resetRetryLink() {
-        retryLinkLeft = 0;
-        retryLinkRight = 0;
-        retryLinkTop = 0;
-        retryLinkBottom = 0;
+        clearLink(retryLink);
+    }
+
+    // ================= 第 2 步：填 API Key =================
+
+    /** 第 2 步的标题正文：不折行的前提下放在标题行下方，与第 1 步的问题行同一高度。 */
+    private static final String API_KEY_QUESTION = "请在此处填入你的API Key";
+
+    /** 输入框的占位提示。 */
+    private static final String API_KEY_HINT = "请输入API Key……";
+
+    /** 输入框宽度占屏幕宽度的比例：两侧留白由它反算。 */
+    private static final float API_KEY_BOX_WIDTH_RATIO = 0.6f;
+    /** 输入框的最小宽度与最大宽度。 */
+    private static final int API_KEY_BOX_MIN_WIDTH = 200;
+    private static final int API_KEY_BOX_MAX_WIDTH = 640;
+    /** 输入框高度。比表格里那行高一点，Key 一般很长，横向舒服更重要。 */
+    private static final int API_KEY_BOX_HEIGHT = 20;
+
+    /** 输入框右侧那个功能按钮的宽高。 */
+    private static final int KEY_ACTION_SIZE = 20;
+    /** 输入框与功能按钮之间的间隙。 */
+    private static final int KEY_ACTION_GAP = 4;
+
+    /** 「请先填入API Key！」这句提示显示多久（毫秒）。 */
+    private static final long MISSING_KEY_HINT_MS = 5000L;
+
+    /** 功能按钮的两个状态的文字。用字体里现成的符号，不依赖彩色 emoji。 */
+    private static final String KEY_ACTION_PASTE = "📋";
+    private static final String KEY_ACTION_CLEAR = "×";
+
+    /**
+     * 剪贴板读取器。
+     * <p>{@link com.mojang.blaze3d.platform.ClipboardManager} 没有实例状态
+     * （只有一个可复用的临时缓冲），自己 new 一个就能用，
+     * 不必去碰 {@code KeyboardHandler} 里那份私有的。
+     */
+    private static final com.mojang.blaze3d.platform.ClipboardManager CLIPBOARD =
+            new com.mojang.blaze3d.platform.ClipboardManager();
+
+    /**
+     * 第 2 步的控件布局。
+     * <p>只有两个控件：输入框与它的功能按钮。其余（标题、结论行、注册链接）
+     * 都是自绘的，不需要事件系统。
+     */
+    private void initApiKeyStep(int buttonY) {
+        int boxWidth = apiKeyBoxWidth();
+        int boxLeft = apiKeyBoxLeft();
+        int boxTop = apiKeyBoxY();
+
+        EditBox box = new GreenBorderedEditBox(this.font, boxLeft, boxTop, boxWidth,
+                API_KEY_BOX_HEIGHT, Component.literal("API Key"));
+        // Key 一般几十个字符，留到 512 足够放下任何一家
+        box.setMaxLength(512);
+        box.setValue(apiKeyText);
+        box.setHint(Component.literal(API_KEY_HINT)
+                .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
+        GreenBorderedEditBox.setFocusedHint(API_KEY_HINT);
+        box.setResponder(this::onApiKeyEdited);
+        this.apiKeyBox = box;
+        this.addRenderableWidget(box);
+
+        // 输入框右边的功能按钮：空时是「粘贴」，有内容时是「清空」。
+        // 用原版 Button 而不是自绘，这样 tooltip 与按下反馈都是现成的
+        Button action = Button.builder(actionLabel(),
+                        btn -> onKeyActionPressed())
+                .pos(boxLeft + boxWidth + KEY_ACTION_GAP, boxTop)
+                .size(KEY_ACTION_SIZE, API_KEY_BOX_HEIGHT)
+                .tooltip(Tooltip.create(actionTooltip()))
+                .build();
+        this.keyActionButton = action;
+        this.addRenderableWidget(action);
+
+        // 进页面直接聚焦，玩家不用先点一下才能打字
+        this.setFocused(box);
+    }
+
+    /**
+     * 输入框宽度：屏幕宽度的 {@link #API_KEY_BOX_WIDTH_RATIO}，
+     * 但夹在最小与最大宽度之间——超宽屏上不该拉成一条长条，
+     * 窄窗口上也不该挤到看不见内容。
+     * <p>右侧留给功能按钮的那一格已经算在里面：按钮画在输入框外面，
+     * 所以整块控件比输入框再宽一点。
+     */
+    private int apiKeyBoxWidth() {
+        int raw = Math.round(this.width * API_KEY_BOX_WIDTH_RATIO);
+        int clamped = Math.max(API_KEY_BOX_MIN_WIDTH, Math.min(API_KEY_BOX_MAX_WIDTH, raw));
+        // 不能宽到把功能按钮挤出屏幕
+        int usable = this.width - 2 * TEXT_SIDE_MARGIN - KEY_ACTION_SIZE - KEY_ACTION_GAP;
+        return Math.max(60, Math.min(clamped, usable));
+    }
+
+    /** 输入框左缘：把「输入框 + 功能按钮」看成一个整体再居中，视觉重心才在屏幕中线上。 */
+    private int apiKeyBoxLeft() {
+        int blockWidth = apiKeyBoxWidth() + KEY_ACTION_GAP + KEY_ACTION_SIZE;
+        return Math.max(0, (this.width - blockWidth) / 2);
+    }
+
+    /** 第 2 步输入框的 Y：与第 1 步的问题行同一高度，翻页时标题不跳。 */
+    private int apiKeyBoxY() {
+        return providerQuestionY() + this.font.lineHeight + 12;
+    }
+
+    /** 留空内那行结论的 Y：紧贴输入框下方。 */
+    private int apiKeyStatusY() {
+        return apiKeyBoxY() + API_KEY_BOX_HEIGHT + 8;
+    }
+
+    /** 「还没有API Key？」那行的 Y。 */
+    private int apiKeyRegisterY() {
+        return apiKeyStatusY() + this.font.lineHeight + 8;
+    }
+
+    /** 功能按钮该显示哪个字：输入框为空时「粘贴」，否则「清空」。 */
+    private String keyActionKey() {
+        return apiKeyText.isEmpty() ? KEY_ACTION_PASTE : KEY_ACTION_CLEAR;
+    }
+
+    private Component actionLabel() {
+        return Component.literal(keyActionKey());
+    }
+
+    private Component actionTooltip() {
+        return Component.literal(apiKeyText.isEmpty() ? "粘贴" : "清空");
+    }
+
+    /**
+     * 按了一下功能按钮：空时从剪贴板粘贴，有内容时清空。
+     * <p>粘贴走 {@link com.mojang.blaze3d.platform.ClipboardManager#getClipboard}
+     * 而不是裸的 {@code GLFW.glfwGetClipboardString}：前者会先做一遍字符清洗
+     * （去掉控制字符、替换掉坏掉的代理对），剪贴板里带着换行的 Key
+     * 也不会把输入框搞坏。它本身没有状态（只有一个可复用的缓冲），
+     * 自己 new 一个就行。
+     */
+    private void onKeyActionPressed() {
+        Minecraft mc = Minecraft.getInstance();
+        if (apiKeyText.isEmpty()) {
+            String raw = CLIPBOARD.getClipboard(mc.getWindow().getWindow(), null);
+            // 从复制界面粘过来的 Key 常常带着换行或前后空格
+            String clip = raw == null ? "" : raw.trim();
+            if (clip.isEmpty()) {
+                // 剪贴板空的：什么都不做，但把焦点交回输入框，方便直接手打
+                if (apiKeyBox != null) this.setFocused(apiKeyBox);
+                if (keyActionButton != null) {
+                    keyActionButton.setTooltip(Tooltip.create(Component.literal(
+                            "剪贴板是空的，请先复制你的 API Key")));
+                }
+                return;
+            }
+            setApiKeyText(clip);
+            if (apiKeyBox != null) this.setFocused(apiKeyBox);
+            // 粘贴之后就当作「玩家已经填完」：跳过 2 秒防抖，立刻校验。
+            // setValue 已经同步触发过一次带防抖的调度，这里的 immediate
+            // 版本会把那次覆盖掉（两者都先 invalidate 再排新的）
+            scheduleApiKeyCheck(true);
+            return;
+        }
+        setApiKeyText("");
+        if (apiKeyBox != null) this.setFocused(apiKeyBox);
+    }
+
+    /**
+     * 把文字写进输入框（同时更新缓存与右侧按钮的字）。
+     * <p>注意 {@link EditBox#setValue} 会<b>同步</b>回调 responder，
+     * 也就是{@link #onApiKeyEdited} 会再进来一次；先写缓存再 setValue，
+     * 让它里面读到的是新值。
+     */
+    private void setApiKeyText(String text) {
+        apiKeyText = text;
+        if (apiKeyBox != null && !apiKeyBox.getValue().equals(text)) {
+            apiKeyBox.setValue(text);
+        }
+        if (keyActionButton != null) {
+            keyActionButton.setMessage(actionLabel());
+            keyActionButton.setTooltip(Tooltip.create(actionTooltip()));
+        }
+    }
+
+    /** 玩家改了 Key。 */
+    private void onApiKeyEdited(String text) {
+        apiKeyText = text;
+        // 右侧按钮的字要跟着在「📋」与「×」之间切
+        if (keyActionButton != null) {
+            keyActionButton.setMessage(actionLabel());
+            keyActionButton.setTooltip(Tooltip.create(actionTooltip()));
+        }
+        if (text.trim().isEmpty()) {
+            // 清空了：结论与「检查中……」都该消失
+            apiKeyCheck = null;
+            checkedApiKey = null;
+            pendingKeyCheckAt = 0L;
+            ApiKeyValidator.invalidate();
+            return;
+        }
+        scheduleApiKeyCheck(false);
+    }
+
+    /**
+     * 安排一次 Key 校验。
+     *
+     * @param immediate 跳过 2 秒防抖（粘贴之后用：玩家已经明确填完了）
+     */
+    private void scheduleApiKeyCheck(boolean immediate) {
+        String key = apiKeyText.trim();
+        if (key.isEmpty()) {
+            apiKeyCheck = null;
+            ApiKeyValidator.invalidate();
+            return;
+        }
+        // 「检查中……」要在打字期间一直挂着，所以这里先把它设上
+        apiKeyCheck = new ApiKeyValidator.Result(ApiKeyValidator.Level.PENDING, "检查中……", ApiKeyValidator.LinkTarget.NONE, null);
+        String baseUrl = ApiKeyValidator.baseUrlFor(pickedProvider, customEndpoint);
+
+        int generation = ApiKeyValidator.invalidate();
+        long delay = immediate ? 0L : ApiKeyValidator.DEBOUNCE_MS;
+        pendingKeyCheckAt = System.currentTimeMillis() + delay;
+        pendingKeyGeneration = generation;
+        pendingKeyBaseUrl = baseUrl;
+        pendingKeyValue = key;
+        pendingKeyGemini = ApiKeyValidator.isGemini(pickedProvider);
+    }
+
+    /** 防抖到点后发起后台校验。与第 1 步的探活同一套做法。 */
+    private void tickApiKeyCheck() {
+        if (pendingKeyCheckAt <= 0L) return;
+        if (System.currentTimeMillis() < pendingKeyCheckAt) return;
+
+        int gen = pendingKeyGeneration;
+        String baseUrl = pendingKeyBaseUrl;
+        String key = pendingKeyValue;
+        boolean gemini = pendingKeyGemini;
+        String providerId = apiKeyProviderId();
+        pendingKeyCheckAt = 0L;
+        pendingKeyGeneration = -1;
+        pendingKeyBaseUrl = "";
+        pendingKeyValue = "";
+
+        // 期间又输入过：这次校验已经作废
+        if (gen != ApiKeyValidator.currentGeneration()) return;
+        if (baseUrl.isEmpty()) {
+            // 没有 Base URL 就没法查（理论上走不到：第 1 步已经拦过）
+            apiKeyCheck = new ApiKeyValidator.Result(ApiKeyValidator.Level.WARN,
+                    "无法判断该 API Key 的可用性", ApiKeyValidator.LinkTarget.NONE, null);
+            return;
+        }
+
+        ApiKeyValidator.checkAsync(baseUrl, key, providerId, gemini, gen, result -> {
+            // 回来的结论必须对得上「当前」输入框里的内容：
+            // 玩家可能在这几秒里又改了字样，旧结论挂上去会误导。
+            // 计时器那边已作废（代号变了），这里再按内容兜一次底
+            if (!key.equals(apiKeyText.trim())) return;
+            apiKeyCheck = result;
+            // 只有绿了才记下「这份结论代表的就是这段 Key」
+            checkedApiKey = result.level() == ApiKeyValidator.Level.OK ? key : null;
+            if (result.level() == ApiKeyValidator.Level.OK) {
+                // 验证通过：立刻写进配置，玩家后面就算跳过几步也已经配好了
+                writeApiKeyToConfig(key);
+            }
+        }, savedPath -> Log.info("[Guide] MODELS_FILE_READY | PATH=" + savedPath));
+    }
+
+    /**
+     * 立刻重试（点「[点击此处]重新尝试」）。
+     * <p>不改 Key，只是跳过防抖重发一次。
+     */
+    private void retryApiKeyCheck() {
+        scheduleApiKeyCheck(true);
+    }
+
+    /**
+     * 当前结论是否还代表输入框里的内容。
+     * <p>玩家绿了之后又改了几个字符，那份绿色结论就不该再当数——
+     * 否则他能在「Key 明明已经改坏了」的状态下靠旧的绿点继续。
+     */
+    private ApiKeyValidator.Result currentApiKeyCheck() {
+        if (apiKeyCheck == null) return null;
+        String key = apiKeyText.trim();
+        if (apiKeyCheck.level() == ApiKeyValidator.Level.OK && !key.equals(checkedApiKey)) {
+            return null;
+        }
+        return apiKeyCheck;
+    }
+
+    /** 结论对应的边框颜色：没有结论时是中性绿（选中态）。 */
+    private int apiKeyBorderColor() {
+        ApiKeyValidator.Result result = currentApiKeyCheck();
+        if (result == null) return COLOR_ROW_SELECTED;
+        return switch (result.level()) {
+            case OK -> COLOR_CHECK_OK;
+            case ERROR -> COLOR_CHECK_ERROR;
+            case WARN -> COLOR_CHECK_WARN;
+            case PENDING -> COLOR_CHECK_PENDING;
+        };
+    }
+
+    /** 结论对应的图标。 */
+    private static Mark apiKeyMark(ApiKeyValidator.Result result) {
+        return switch (result.level()) {
+            case OK -> Mark.CHECK;
+            case ERROR -> Mark.CROSS;
+            case WARN -> Mark.DOT_WARN;
+            case PENDING -> Mark.DOT_PENDING;
+        };
+    }
+
+    /** 当前选中项对应的 Verity 提供商标识（{@code OPENAI} / {@code GEMINI} / {@code GROQ}…）。 */
+    private static String apiKeyProviderId() {
+        Providers.PickerOption option = Providers.pickerOption(pickedProvider);
+        return option == null || option.provider() == null ? "" : option.provider();
+    }
+
+    /** 第 2 步要显示的那一行结论；{@code null} 表示不显示。 */
+    private ApiKeyValidator.Result effectiveApiKeyCheck() {
+        // 「请先填入 API Key！」的优先级最高：它是玩家刚触发的、有时效的提醒
+        if (System.currentTimeMillis() < missingKeyHintUntilMs) {
+            return new ApiKeyValidator.Result(ApiKeyValidator.Level.ERROR,
+                    "请先填入API Key！", ApiKeyValidator.LinkTarget.NONE, null);
+        }
+        return currentApiKeyCheck();
+    }
+
+    /**
+     * 点「继续」时把 Key 写进配置。
+     *
+     * @return {@code false} 表示被拦下，不该翻页
+     */
+    private boolean commitApiKey() {
+        String key = apiKeyText.trim();
+        if (key.isEmpty()) {
+            // 空着就点：输入框变红 + 留空内和按键下方同时出现红字，5 秒后自己消失
+            missingKeyHintUntilMs = System.currentTimeMillis() + MISSING_KEY_HINT_MS;
+            Log.info("[Guide] API_KEY_MISSING | STEP=" + step);
+            return false;
+        }
+        ApiKeyValidator.Result result = currentApiKeyCheck();
+        // 黄（还在检查）与红（Key 无效）都不许往下走；
+        // 橙色（欠费 / 繁忙 / 说不准 / 连不上）放行——玩家可能就是在那种状态下想先配完
+        if (result != null && result.blocksNext()) {
+            Log.info("[Guide] CONFIRM_BLOCKED | BY=API_KEY_CHECK | VERDICT=" + result.level());
+            return false;
+        }
+        writeApiKeyToConfig(key);
+        return true;
+    }
+
+    /** 把 Key 写进 Verity 的配置（顺带同步给翻译模组那边）。 */
+    private void writeApiKeyToConfig(String key) {
+        VerityConfigManager.ConfigData data = VerityConfigManager.loadVerityConfig();
+        if (key.equals(data.apiKey)) {
+            // 已经是这个值，不必再写一次盘
+            return;
+        }
+        data.apiKey = key;
+        VerityConfigManager.saveAll(data, data.provider);
+        Log.info("[Guide] API_KEY_COMMITTED | aiProvider=" + data.provider
+                + " | LENGTH=" + key.length());
+    }
+
+    /** 打开一个网址；没有地址时什么都不做。 */
+    private static void openUrl(String url) {
+        if (url == null || url.isBlank()) return;
+        try {
+            net.minecraft.Util.getPlatform().openUri(url);
+        } catch (RuntimeException e) {
+            Log.warn("[Guide] OPEN_URL_FAILED | URL=" + url + " | ERROR=" + e);
+        }
+    }
+
+    /**
+     * 「继续」是否可点：黄（检查中）与红（Key 无效）置灰，其余放行。
+     *
+     * <p><b>输入框为空时要保持可点。</b> 需求里写的是「点击时 API Key 留空，
+     * 则让输入框变红 + 出现红字」——按钮要是先被置灰，这个点击根本到不了
+     * {@link #commitApiKey()}，那句提示就永远出不来。置灰 ≠ 禁用逻辑，
+     * 真正的拦截在 {@link #commitApiKey()} 里。
+     */
+    private boolean apiKeyContinueEnabled() {
+        if (apiKeyText.trim().isEmpty()) return true;
+        ApiKeyValidator.Result result = currentApiKeyCheck();
+        return result == null || !result.blocksNext();
+    }
+
+    /** 第 2 步点「[点击此处]」时该去哪里。 */
+    private void onApiKeyStatusLink() {
+        ApiKeyValidator.Result result = currentApiKeyCheck();
+        if (result == null) return;
+        // 就重试：不改 Key，跳过一次防抖重发
+        if (result.linkTarget() == ApiKeyValidator.LinkTarget.RETRY) {
+            retryApiKeyCheck();
+            return;
+        }
+        // 其余两种都要去该提供商的平台页面，地址按第 1 步选的那家取
+        Providers.PickerOption option = Providers.selectedOption(pickedProvider);
+        if (option == null) return;
+        switch (result.linkTarget()) {
+            case NEW_KEY -> openUrl(option.newKeyUrl());
+            case TOP_UP -> openUrl(option.topUpUrl());
+            default -> { }
+        }
+    }
+
+    // ---------- 第 2 步的绘制 ----------
+
+    /** 画第 2 步：标题、结论行、「还没有API Key？」、以及「继续」被拦时的第二处红字。 */
+    private void renderApiKeyStep(GuiGraphics graphics, int mouseX, int mouseY) {
+        int centerX = this.width / 2;
+
+        graphics.drawCenteredString(this.font, Component.literal(API_KEY_QUESTION),
+                centerX, providerQuestionY(), COLOR_BODY);
+
+        renderApiKeyStatus(graphics);
+
+        // 「还没有API Key？[点击此处]获取！」只有预置提供商才有——
+        // 选「自定义」时没有对应的开放平台可跳
+        Providers.PickerOption option = Providers.selectedOption(pickedProvider);
+        if (option != null) {
+            renderApiKeyRegisterLink(graphics, centerX);
+        } else {
+            clearLink(keyRegisterLink);
+        }
+
+        // 空着点「继续」时，除了留空内那句红字，按键下方再来一处，
+        // 因为玩家的视线那时在按钮上
+        if (System.currentTimeMillis() < missingKeyHintUntilMs) {
+            graphics.drawCenteredString(this.font, Component.literal("请先填入API Key！"),
+                    centerX, providerHintY(), COLOR_WARN);
+        }
+    }
+
+    /** 留空内那行结论：图标 + 文字 + 可选的「[点击此处]」。 */
+    private void renderApiKeyStatus(GuiGraphics graphics) {
+        ApiKeyValidator.Result result = effectiveApiKeyCheck();
+        if (result == null) {
+            clearLink(keyStatusLink);
+            return;
+        }
+        int color = switch (result.level()) {
+            case OK -> COLOR_CHECK_OK;
+            case ERROR -> COLOR_CHECK_ERROR;
+            case WARN -> COLOR_CHECK_WARN;
+            case PENDING -> COLOR_CHECK_PENDING;
+        };
+        drawStatusLine(graphics, apiKeyBoxLeft(), apiKeyStatusY(),
+                apiKeyMark(result), color, result.message(),
+                result.hasLink() ? result.tailText() : null, keyStatusLink);
+    }
+
+    /** 「还没有API Key？[点击此处]获取！」链接。 */
+    private void renderApiKeyRegisterLink(GuiGraphics graphics, int centerX) {
+        String lead = "还没有API Key？";
+        String action = "[点击此处]";
+        String tail = "获取！";
+        int leadW = this.font.width(lead);
+        int actionW = this.font.width(action);
+        int tailW = this.font.width(tail);
+        int x = centerX - (leadW + actionW + tailW) / 2;
+        int y = apiKeyRegisterY();
+
+        graphics.drawString(this.font, lead, x, y, COLOR_BODY, false);
+        graphics.drawString(this.font, action, x + leadW, y, COLOR_RETRY_LINK, false);
+        graphics.drawString(this.font, tail, x + leadW + actionW, y, COLOR_BODY, false);
+
+        keyRegisterLink[0] = x + leadW;
+        keyRegisterLink[1] = x + leadW + actionW;
+        keyRegisterLink[2] = y;
+        keyRegisterLink[3] = y + this.font.lineHeight;
+    }
+
+    // ---------- 校验结论行的通用画法 ----------
+
+    /**
+     * 画一行「图标 + 正文 + 可选链接」，并记下链接的可点区域。
+     *
+     * <p>第 1 步（网址校验）与第 2 步（Key 校验）的结论行长得一样，
+     * 只有链接后面的措辞不同，所以共用这一份：两处各画一遍的话，
+     * 改一次颜色或间距就得记得改两处。
+     *
+     * <p>链接的配色规则：只有方括号里的「[点击此处]」是青色（可点），
+     * 前面那个空格和后面那段说明跟正文同色——整段一起上色的话，
+     * 玩家分不清点哪儿才有用。
+     *
+     * @param tail 链接后面紧跟的文字；{@code null} 表示没有
+     * @param link 长度为 4 的 int 数组，按 {@code left, right, top, bottom} 写入可点区域
+     */
+    private void drawStatusLine(GuiGraphics graphics, int x, int y,
+                                Mark mark, int color, String message,
+                                String tail, int[] link) {
+        // 图标
+        String symbol = mark.symbol();
+        graphics.drawString(this.font, symbol, x, y, color, false);
+        int textX = x + this.font.width(symbol) + CHECK_ICON_GAP;
+        graphics.drawString(this.font, message, textX, y, color, false);
+
+        if (tail == null) {
+            clearLink(link);
+            return;
+        }
+
+        String space = " ";
+        String action = "[点击此处]";
+        int afterText = textX + this.font.width(message);
+        graphics.drawString(this.font, space, afterText, y, color, false);
+        int actionX = afterText + this.font.width(space);
+        graphics.drawString(this.font, action, actionX, y, COLOR_RETRY_LINK, false);
+        graphics.drawString(this.font, tail, actionX + this.font.width(action), y, color, false);
+
+        // 可点区域只覆盖「[点击此处]」本身
+        link[0] = actionX;
+        link[1] = actionX + this.font.width(action);
+        link[2] = y;
+        link[3] = y + this.font.lineHeight;
+    }
+
+    /** 把一个链接区域清空。 */
+    private static void clearLink(int[] link) {
+        link[0] = 0;
+        link[1] = 0;
+        link[2] = 0;
+        link[3] = 0;
+    }
+
+    /** 点击是否落在某个链接区域内。 */
+    private static boolean linkHit(int[] link, double mouseX, double mouseY) {
+        return link[1] > link[0]
+                && mouseX >= link[0] && mouseX < link[1]
+                && mouseY >= link[2] && mouseY < link[3];
     }
 
     /** 结论对应的颜色。 */
@@ -1034,17 +1613,6 @@ public class GuideScreen extends Screen {
             case WARN -> COLOR_CHECK_WARN;
             case PENDING -> COLOR_CHECK_PENDING;
         };
-    }
-
-    /**
-     * 在 {@code x, y} 处画校验图标，返回图标之后的文字应该从哪个 x 开始。
-     * <p>直接用字体里的符号（√ × ●），不再手拼像素块：
-     * 符号自带正确的字形与基线，换分辨率或改字号都不用重画。
-     */
-    private int drawCheckMark(GuiGraphics graphics, int x, int y) {
-        String symbol = iconFor(endpointCheck).symbol();
-        graphics.drawString(this.font, symbol, x, y, checkColor(endpointCheck), false);
-        return x + this.font.width(symbol) + CHECK_ICON_GAP;
     }
 
     /** 按结论挑图标形状。 */
@@ -1600,11 +2168,28 @@ public class GuideScreen extends Screen {
         int done = switch (position) {
             case START -> 0;
             case STEP -> (step - 1) * SUB_STEPS
-                    + (step == STEP_PROVIDER ? providerStepSubSteps() : subStepProgress);
+                    + (step == STEP_PROVIDER ? providerStepSubSteps()
+                    : step == STEP_API_KEY ? apiKeyStepSubSteps()
+                    : subStepProgress);
             case FINISH -> GameState.STEPS * SUB_STEPS;
         };
         int total = GameState.STEPS * SUB_STEPS;
         return Math.max(0, Math.min(total, done));
+    }
+
+    /**
+     * 第 2 步当前该显示的份数（0..{@link #SUB_STEPS}）。
+     * <ul>
+     *   <li>什么都没做 → 0；</li>
+     *   <li>点过「还没有API Key？」里的「[点击此处]」去了开放平台 → 1 份；</li>
+     *   <li>Key 验证通过（绿）→ 2 份。</li>
+     * </ul>
+     * <p>与第 1 步一样，最多给到 2 份：这一步真正走完时才该填满。
+     */
+    private int apiKeyStepSubSteps() {
+        ApiKeyValidator.Result result = currentApiKeyCheck();
+        if (result != null && result.level() == ApiKeyValidator.Level.OK) return 2;
+        return registerLinkOpened ? 1 : 0;
     }
 
     /**
@@ -1709,6 +2294,7 @@ public class GuideScreen extends Screen {
      */
     private static String tickLabel(int index) {
         if (index + 1 == STEP_PROVIDER) return "选择提供商";
+        if (index + 1 == STEP_API_KEY) return "填入 API Key";
         return "第" + (index + 1) + "步";
     }
 
@@ -1886,7 +2472,7 @@ public class GuideScreen extends Screen {
             drawHoverUnderline(graphics, x0, x1);
         }
 
-        // 正文：欢迎页与第 1 步有真实内容，其余几页还是占位
+        // 正文：欢迎页与第 1、2 步有真实内容，其余几页还是占位
         if (position == Position.START) {
             renderStartText(graphics);
         } else if (position == Position.STEP && step == STEP_PROVIDER) {
@@ -1895,6 +2481,10 @@ public class GuideScreen extends Screen {
                     endpointCheck != null && customMode()
                             ? checkColor(endpointCheck) : COLOR_ROW_SELECTED);
             renderProviderStep(graphics, mouseX, mouseY);
+        } else if (position == Position.STEP && step == STEP_API_KEY) {
+            // 边框颜色：绿/红/橙/黄取决于 Key 的校验结论
+            GreenBorderedEditBox.setBorderColor(apiKeyBorderColor());
+            renderApiKeyStep(graphics, mouseX, mouseY);
         } else {
             graphics.drawCenteredString(this.font, Component.literal(bodyText()),
                     centerX, this.height / 2 - 20, COLOR_HEADING);
@@ -1922,9 +2512,20 @@ public class GuideScreen extends Screen {
         if (endpointBox != null) {
             endpointBox.tick();
         }
+        if (apiKeyBox != null) {
+            apiKeyBox.tick();
+        }
         // 停止输入满 2 秒就发起探活
         if (position == Position.STEP && step == STEP_PROVIDER) {
             tickEndpointCheck();
+        }
+        if (position == Position.STEP && step == STEP_API_KEY) {
+            tickApiKeyCheck();
+            // 校验结论会在异步回调里变，按钮的可用性跟着它走，
+            // 放在 tick 里每帧对一次，就不用担心漏掉哪条更新路径
+            if (mainButton != null) {
+                mainButton.active = apiKeyContinueEnabled();
+            }
         }
     }
 
@@ -1962,6 +2563,23 @@ public class GuideScreen extends Screen {
                         return super.mouseClicked(mouseX, mouseY, button);
                     }
                     onProviderPicked(picked);
+                    return true;
+                }
+            }
+
+            // 第 2 步的结论链接与注册链接也是自绘的
+            if (position == Position.STEP && step == STEP_API_KEY) {
+                if (linkHit(keyStatusLink, mouseX, mouseY)) {
+                    onApiKeyStatusLink();
+                    return true;
+                }
+                if (linkHit(keyRegisterLink, mouseX, mouseY)) {
+                    Providers.PickerOption option = Providers.selectedOption(pickedProvider);
+                    if (option != null) {
+                        openUrl(option.registerUrl());
+                        // 去过开放平台了：进度 +1（之后 Key 一旦变绿就升到 +2）
+                        registerLinkOpened = true;
+                    }
                     return true;
                 }
             }
@@ -2004,15 +2622,21 @@ public class GuideScreen extends Screen {
             next();
             return true;
         }
+        if (position == Position.STEP && step == STEP_API_KEY
+                && apiKeyBox != null && apiKeyBox.isFocused()
+                && (keyCode == 257 || keyCode == 335)) {
+            next();
+            return true;
+        }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
 
     /**
-     * 边框是绿色的输入框。
+     * 边框颜色由外部指定的输入框。
      *
-     * <p>它被塞进「自定义」那一项的选中框里，原版的白色边框套在绿框里会像
-     * 「框中框」，所以要自己画边框。
+     * <p>它被塞进「自定义」那一项的选中框里（第 1 步）或独占一行（第 2 步），
+     * 原版的白色边框套在彩色框里会像「框中框」，所以要自己画边框。
      *
      * <p><b>但不能关掉 {@code setBordered(false)}。</b> 反编译 1.20.1 的
      * {@code EditBox.renderWidget} 可以看到 bordered 同时决定两件事：
@@ -2022,8 +2646,8 @@ public class GuideScreen extends Screen {
      *   <li>提示文字的绘制条件：{@code hint != null && value.isEmpty() && !isFocused()}
      *       —— 与 bordered 无关，但关掉后背景也不画了，白底会透出来。</li>
      * </ul>
-     * 所以这里<b>保持 bordered 为 true</b>，只在自己画的绿框之前先让父类画一遍，
-     * 用纯黑底盖住原版的白框与浅色底，最后再把绿框补在最上层。
+     * 所以这里<b>保持 bordered 为 true</b>，只在自己画的彩色框之前先让父类画一遍，
+     * 用纯黑底盖住原版的白框与浅色底，最后再把彩色框补在最上层。
      */
     private static final class GreenBorderedEditBox extends EditBox {
 
@@ -2035,9 +2659,17 @@ public class GuideScreen extends Screen {
          */
         private static int borderColor = COLOR_ROW_SELECTED;
 
+        /** 空且聚焦时要补画的提示文字；{@code null} 表示不补。 */
+        private static String focusedHint;
+
         /** 由外部按校验结果设置边框颜色。 */
         static void setBorderColor(int color) {
             borderColor = color;
+        }
+
+        /** 由外部设置「聚焦且为空时」要补画的提示文字。 */
+        static void setFocusedHint(String hint) {
+            focusedHint = hint;
         }
 
         GreenBorderedEditBox(net.minecraft.client.gui.Font font, int x, int y, int width, int height,
@@ -2067,11 +2699,10 @@ public class GuideScreen extends Screen {
             // 2. 提示文字：父类只在「未聚焦」时画（hint != null && value.isEmpty()
             //    && !isFocused()）。这个输入框一被点中就聚焦，提示当场消失，
             //    玩家反而看不到该填什么。这里在聚焦且为空时补画一份。
-            if (getValue().isEmpty() && isFocused()) {
-                Component hint = Component.literal("请填入 AI 提供商文档中的AI Endpoint")
-                        .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC);
+            if (getValue().isEmpty() && isFocused() && focusedHint != null) {
                 // 与父类同样的排版：左内边距 4px、垂直居中
-                graphics.drawString(Minecraft.getInstance().font, hint,
+                graphics.drawString(Minecraft.getInstance().font,
+                        Component.literal(focusedHint).withStyle(ChatFormatting.ITALIC),
                         x + 4, y + (h - 8) / 2, 0xFF777777, false);
             }
         }

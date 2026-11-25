@@ -128,9 +128,10 @@ src/main/java/com/cb2495/verityplus/
 │   ├── ModConfig.java                 本模组自己的开关
 │   ├── GameState.java                 引导状态（.cache/verity_plus/game_state）
 │   └── Providers.java                 AI 提供商与模型清单（引导第 1 步使用）
-├── screen/                            独立界面（6 个类）
+├── screen/                            独立界面（7 个类）
 │   ├── GuideScreen.java               引导教程（欢迎页 + 5 步 + 结束页）
 │   ├── EndpointValidator.java         自定义 Endpoint 的格式与可用性校验
+│   ├── ApiKeyValidator.java           API Key 的可用性校验与模型清单落盘
 │   ├── ResumePrompt.java              「上次配置未完成」确认框
 │   ├── SponsorScreen.java             赞助页
 │   ├── RestartPrompt.java             重启确认
@@ -148,12 +149,11 @@ src/main/resources/
 
 ### 关于 `Providers`
 
-`config/Providers.java` 是一张「提供商 → 端点 / API 格式 / Key 申请页 / 模型清单」
-的表。**目前没有任何界面在用它**——旧的自带 AI 配置界面已经移除。
-保留它是为了重写首次启动配置流程时直接复用：
-用户选一个提供商，就自动填上 Base URL 与可选模型。
+`config/Providers.java` 是一张「提供商 → 端点 / API 格式 / Key 申请页 / 模型清单 /
+新建 Key·充值·注册网址」的表。引导的第 1、2 步都直接读它：
+第 1 步拿端点与介绍，第 2 步拿三个跳转网址。
 
-`widget/DropdownWidget` 同理：它是通用的下拉框控件，暂时没有调用方。
+`widget/DropdownWidget` 是通用的下拉框控件，暂时没有调用方。
 
 ---
 
@@ -278,7 +278,15 @@ gradlew.bat :modpackhelper:runClient
 
 - 第 1 步「选择提供商」已是真实功能：选中后写入 aiProvider / aiEndpoint。
   选「自定义」时还会对填入的地址做格式检查与后台探活（GET <endpoint>/models）。
-  第 2~5 步仍是占位
+
+- 第 2 步「填入 API Key」已是真实功能：带 Key 请求 `<baseUrl>/models`
+  （Gemini 走 `?key=`），200 时把原始 JSON 覆盖写入 `.cache/verity_plus/ai_models`，
+  并按 401 / 402 / 429·5xx / 连不上分别给红、橙、橙、橙的结论。
+  验证通过或点「继续」时写入 aiKey。
+  两个例外：OpenRouter 的 `/models` 是公开接口（任何 Key 都回 200），
+  所以它改打 `/auth/key`；Gemini 的无效 Key 回的是 400 API_KEY_INVALID。
+
+- 第 3~5 步仍是占位
 
 ---
 

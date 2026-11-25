@@ -196,14 +196,18 @@ public final class Providers {
     /**
      * 引导第一页列表里的一项。
      *
-     * @param label     左边一列显示的提供商名
-     * @param desc      右边一列显示的介绍；为空表示这一项没有介绍（选中后右列换成输入框）
-     * @param provider  选中后要写进 {@code aiProvider} 的值；{@code null} 表示只有 {@code endpoint}
-     * @param endpoint  选中后要写进 {@code aiEndpoint} 的地址；{@code null} 表示不写
-     * @param note      选中后额外补一行技术提示；{@code null} 表示没有
+     * @param label        左边一列显示的提供商名
+     * @param desc         右边一列显示的介绍；为空表示这一项没有介绍（选中后右列换成输入框）
+     * @param provider     选中后要写进 {@code aiProvider} 的值；{@code null} 表示只有 {@code endpoint}
+     * @param endpoint     选中后要写进 {@code aiEndpoint} 的地址；{@code null} 表示不写
+     * @param note         选中后额外补一行技术提示；{@code null} 表示没有
+     * @param newKeyUrl    「新建一个 API Key」跳转的页面；空串表示没有
+     * @param topUpUrl     「充值」跳转的页面；空串表示没有
+     * @param registerUrl  「获取 API Key」跳转的注册页；空串表示没有（自定义永远为空）
      */
     public record PickerOption(String label, String desc,
-                               String provider, String endpoint, String note) {
+                               String provider, String endpoint, String note,
+                               String newKeyUrl, String topUpUrl, String registerUrl) {
 
         /** 「自定义」：地址由玩家自己填，右列换成输入框。 */
         public boolean isCustom() {
@@ -221,30 +225,52 @@ public final class Providers {
      * <p>DeepSeek / 智谱 / ChatGPT / OpenRouter / Mistral 走的都是 OpenAI 兼容接口，
      * Verity 侧只能填 {@code OPENAI}，靠 {@code aiEndpoint} 区分；
      * 只有 Gemini / GROQ 是独立枚举。
-     * <p>ChatGPT 的 {@code aiEndpoint} 目前留空：地址还没定，先只切提供商，
-     * 不能拿别的端点顶上去——填错了请求会打到完全不相干的服务上。
+     * <p>每项的末尾三个地址是第 2 步（填 API Key）要用的跳转目标，
+     * 顺序固定为：新建 Key / 充值 / 注册。
      */
     private static List<PickerOption> pickerTemplate() {
         List<PickerOption> list = new ArrayList<>();
         list.add(new PickerOption(PICKER_PLACEHOLDER, "选择一个你中意的 AI 提供商",
-                null, null, null));
+                null, null, null, "", "", ""));
         list.add(new PickerOption("GROQ", "试玩首选（仅国外），极速输出，有免费额度，国内可能无法稳定访问",
-                GROQ, null, "已切换为 GROQ，但模型尚未配置"));
+                GROQ, null, "已切换为 GROQ，但模型尚未配置",
+                "https://console.groq.com/keys",
+                "https://console.groq.com/settings/billing",
+                "https://console.groq.com/login"));
         list.add(new PickerOption("DeepSeek", "对话自然，擅长深度思考，性价比高，分峰谷计费",
-                OPENAI, "https://api.deepseek.com/v1", null));
+                OPENAI, "https://api.deepseek.com/v1", null,
+                "https://platform.deepseek.com/api_keys",
+                "https://platform.deepseek.com/top_up",
+                "https://platform.deepseek.com/sign_in"));
         list.add(new PickerOption("智谱", "试玩首选，上手轻便，有免费模型与免费额度，部分时间段可能反应迟钝",
-                OPENAI, "https://open.bigmodel.cn/api/paas/v4", null));
-        // 地址待定：只切 provider，不写 endpoint
+                OPENAI, "https://open.bigmodel.cn/api/paas/v4", null,
+                "https://open.bigmodel.cn/console/apikeys",
+                "https://open.bigmodel.cn/console/finance",
+                "https://open.bigmodel.cn/login"));
+        // 地址用 OpenAI 官方的兼容端点：ChatGPT 没有独立的 API 域名，
+        // 平台上的 /v1 就是它的 Base URL
         list.add(new PickerOption("ChatGPT", "能力顶尖，功能强大，价格偏高，国内无法正常访问",
-                OPENAI, null, "ChatGPT 的 Endpoint 尚未内置，请自行填写后再使用"));
+                OPENAI, "https://api.openai.com/v1", null,
+                "https://platform.openai.com/api-keys",
+                "https://platform.openai.com/settings/organization/billing/overview",
+                "https://platform.openai.com/signup"));
         list.add(new PickerOption("Gemini", "聪慧（？），有免费额度，国内无法正常访问",
-                GEMINI, null, "已切换为 Gemini，但模型尚未配置"));
+                GEMINI, "https://generativelanguage.googleapis.com/v1beta", "已切换为 Gemini，但模型尚未配置",
+                "https://aistudio.google.com/app/apikey",
+                "https://aistudio.google.com/app/billing",
+                "https://aistudio.google.com/"));
         list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内可能无法稳定访问",
-                OPENAI, "https://openrouter.ai/api/v1", null));
+                OPENAI, "https://openrouter.ai/api/v1", null,
+                "https://openrouter.ai/settings/keys",
+                "https://openrouter.ai/settings/credits",
+                "https://openrouter.ai/sign-up"));
         list.add(new PickerOption("Mistral", "多语言表现佳，有免费额度，国内无法正常访问",
-                OPENAI, "https://api.mistral.ai/v1", null));
+                OPENAI, "https://api.mistral.ai/v1", null,
+                "https://console.mistral.ai/api-keys/",
+                "https://console.mistral.ai/billing/",
+                "https://console.mistral.ai/"));
         list.add(new PickerOption(CUSTOM_LABEL,
-                "接入你自己使用的 AI API，仅限 OpenAI 接口", OPENAI, null, null));
+                "接入你自己使用的 AI API，仅限 OpenAI 接口", OPENAI, null, null, "", "", ""));
         return list;
     }
 
@@ -296,5 +322,18 @@ public final class Providers {
             if (option.label().equals(label)) return option;
         }
         return null;
+    }
+
+    // ========== 第 2 步：用刚选的提供商去查 Key 相关地址 ==========
+
+    /**
+     * 第 2 步要用的那一项：把第 1 步选中的显示名换算成 {@link PickerOption}。
+     * <p>选的是「自定义」或者还没选时返回 {@code null}，调用方据此隐藏
+     * 「获取 API Key」这类预置提供商才有的入口。
+     */
+    public static PickerOption selectedOption(String pickedLabel) {
+        PickerOption option = pickerOption(pickedLabel);
+        if (option == null || option.isCustom() || option.isPlaceholder()) return null;
+        return option;
     }
 }
