@@ -197,8 +197,18 @@ public class GuideScreen extends Screen {
      */
     private static int maxReachedStep = 0;
 
-    /** 所有进度动画的时长（毫秒）。 */
-    private static final long BAR_ANIM_MS = 380L;
+    /**
+     * 进度条<b>展开</b>动画的时长（毫秒）。
+     * <p>这条动画只在第一次显示进度条时播一次，节奏可以慢一些、更有「铺开」的仪式感，
+     * 所以用 1000ms 配 {@code LinearOutSlowIn}（先匀速后减速，Material 的标准进场曲线）。
+     */
+    private static final long BAR_APPEAR_MS = 1000L;
+
+    /**
+     * 进度条<b>前进 / 后退</b>动画的时长（毫秒）。
+     * <p>用指数缓出：开头极快、末尾极缓，翻页时数字变化立刻可见，尾巴又不会显得生硬。
+     */
+    private static final long BAR_MOVE_MS = 600L;
 
     // ---------- 构造 ----------
 
@@ -1396,17 +1406,14 @@ public class GuideScreen extends Screen {
     }
 
     /**
-     * 推进进度条动画：按<b>缓出曲线</b>从上一位置过渡到目标位置。
+     * 推进进度条动画：从上一位置平滑过渡到目标位置。
      *
      * <p>做法是「补间」而不是「匀速追赶」：记录起点值、终点值和起始时间，
-     * 每帧用 {@code easeOutCubic} 把 0..1 的时间映射成 0..1 的位移比例。
-     * 相比线性逼近，快慢变化更明显——开头快、结尾缓，看起来更顺滑。
+     * 每帧把 0..1 的时间经缓动曲线映射成 0..1 的位移比例。
      *
-     * <p>两种过渡共用一个动画状态：
-     * <ul>
-     *   <li><b>出现</b>：底槽与绿色填充一起从 0 拉出去；</li>
-     *   <li><b>翻页 / +1</b>：已在显示的进度条平滑推进到新位置。</li>
-     * </ul>
+     * <p>这里只管<b>前进 / 后退</b>（翻页、点「+1」、切换提供商）：
+     * 曲线是指数缓出，时长 {@link #BAR_MOVE_MS}。
+     * 进度条的<b>展开</b>是另一条独立的动画，见 {@link #appearProgress()}。
      */
     private void tickBarAnimation() {
         int target = targetSubSteps();
@@ -1437,27 +1444,66 @@ public class GuideScreen extends Screen {
             return;
         }
 
-        float t = (now - animStartMs) / (float) BAR_ANIM_MS;
+        float t = (now - animStartMs) / (float) BAR_MOVE_MS;
         if (t >= 1.0f) {
             shownSubSteps = animTo;
             animating = false;
         } else {
-            // 缓出：开头快、结尾缓
-            float eased = easeOutCubic(t);
+            // 指数缓出：开头极快、末尾极缓
+            float eased = easeOutExpo(t);
             shownSubSteps = animFrom + (animTo - animFrom) * eased;
         }
         lastAnimFrameMs = now;
     }
 
-    /** 缓出曲线：{@code 1-(1-t)^3}。t=0→0，t=1→1，且前段变化快、后段趋缓。 */
-    private static float easeOutCubic(float t) {
-        float inv = 1.0f - t;
-        return 1.0f - inv * inv * inv;
+    /**
+     * 指数缓出曲线：{@code t=1} 时为 1，其余时刻为 {@code 1 - 2^(-10t)}。
+     * <p>开头推进得极快（前 10% 的时间就走过约一半），后面无限趋缓。
+     * 纯指数在 t=0 处会从 0 跳到 0.00098，肉眼看不出来；t=1 处收不到 1，
+     * 所以显式特判，避免最后一帧留下千分之一的残余。
+     */
+    private static float easeOutExpo(float t) {
+        if (t >= 1.0f) return 1.0f;
+        return 1.0f - (float) Math.pow(2.0, -10.0 * t);
+    }
+
+    /**
+     * {@code LinearOutSlowIn} 曲线（Material Design 的标准进场缓动）。
+     * <p>标准写法是一条以 {@code (0.35, 0)} 与 {@code (0.25, 1)} 为控制点的立方贝塞尔。
+     * 这里用二分法反解「给定时间比例 t，位移比例是多少」——
+     * 贝塞尔是参数曲线，直接取 t 当参数会得到错误的时序。
+     */
+    private static float linearOutSlowIn(float t) {
+        if (t <= 0.0f) return 0.0f;
+        if (t >= 1.0f) return 1.0f;
+
+        // 三次贝塞尔的控制点：P0=(0,0) P1=(0.35,0) P2=(0.25,1) P3=(1,1)
+        final double x1 = 0.35, x2 = 0.25;
+        final double y1 = 0.0, y2 = 1.0;
+
+        // 先在参数 u 上二分，找到使 x(u) == t 的那个 u
+        double lo = 0.0, hi = 1.0;
+        for (int i = 0; i < 20; i++) {
+            double u = (lo + hi) * 0.5;
+            if (bezier(u, x1, x2) < t) {
+                lo = u;
+            } else {
+                hi = u;
+            }
+        }
+        return (float) bezier((lo + hi) * 0.5, y1, y2);
+    }
+
+    /** 三次贝塞尔曲线在一个轴上的取值（端点固定为 0 与 1）。 */
+    private static double bezier(double u, double p1, double p2) {
+        double inv = 1.0 - u;
+        // 3(1-u)²u·p1 + 3(1-u)u²·p2 + u³
+        return 3 * inv * inv * u * p1 + 3 * inv * u * u * p2 + u * u * u;
     }
 
     /**
      * 出现动画的进度 0..1：点「开始」后底槽从左侧拉出。
-     * <p>同样是缓出曲线，与绿条的推进各自独立。
+     * <p>用 {@code LinearOutSlowIn} + 1000ms，与绿条的推进（指数缓出 600ms）各自独立。
      * <p>若起始时间尚未设置（正常不会发生），就地补一个，避免进度条永远不出现。
      */
     private float appearProgress() {
@@ -1465,8 +1511,8 @@ public class GuideScreen extends Screen {
             appearStartMs = System.currentTimeMillis();
         }
         long elapsed = System.currentTimeMillis() - appearStartMs;
-        if (elapsed >= BAR_ANIM_MS) return 1.0f;
-        return easeOutCubic(elapsed / (float) BAR_ANIM_MS);
+        if (elapsed >= BAR_APPEAR_MS) return 1.0f;
+        return linearOutSlowIn(elapsed / (float) BAR_APPEAR_MS);
     }
 
     /**
