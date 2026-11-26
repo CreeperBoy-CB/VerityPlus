@@ -286,6 +286,13 @@ gradlew.bat :modpackhelper:runClient
   两个例外：OpenRouter 的 `/models` 是公开接口（任何 Key 都回 200），
   所以它改打 `/auth/key`；Gemini 的无效 Key 回的是 400 API_KEY_INVALID。
 
+- **哪些提供商会写 `aiEndpoint`**：只有 Verity 真正读取它的才会——
+  DeepSeek、智谱、ChatGPT（都是 `OPENAI` 路径）以及玩家填的自定义地址。
+  Gemini（`GoogleGenAiChatModel`）、Mistral（`MistralAiChatModel`）、
+  OpenRouter 与 GROQ（`OpenAiChatModel` + 硬编码 baseUrl）这四家
+  Verity 不读 endpoint，所以一律写空串，交给 Verity 自己的默认地址。
+  验 Key 时仍需要真实地址，那部分在 `ApiKeyValidator.defaultBaseUrl` 里补齐。
+
 - 第 3~5 步仍是占位
 
 ---

@@ -181,6 +181,20 @@ public class GuideScreen extends Screen {
     /** 第 2 步输入框右边那个功能按钮（📋 粘贴 / × 清空）的引用。 */
     private Button keyActionButton;
 
+    /**
+     * 本轮引导是否已经从 Verity 配置里补过各步骤的选择。
+     * <p>只补一次：补完之后玩家在同一轮里的改动必须保持权威，
+     * 不能被配置里的旧值反复盖回去。
+     */
+    private static boolean stepAnswersRestored = false;
+
+    /**
+     * 正在把清洗后的 Key 写回输入框。
+     * <p>{@link EditBox#setValue} 会同步回调 responder，不清掉的话会在
+     * {@link #onApiKeyEdited} 里递归一圈。
+     */
+    private boolean sanitizingApiKey = false;
+
     /** 主按钮（开始 / 确认 / 继续 / 完成）的引用：第 2 步要按 Key 的结论置灰。 */
     private Button mainButton;
 
@@ -283,6 +297,9 @@ public class GuideScreen extends Screen {
         this.position = position;
         this.step = Math.max(1, Math.min(GameState.STEPS, step));
         this.onFinished = onFinished;
+        // 每个入口（欢迎页 / 续做 / 跳页）都会经过这里，在这里补一次最省事。
+        // 必须在构造时就补：init() 里要用 pickedProvider 决定放哪些控件
+        restoreAnswersFromConfig();
     }
 
     /**
@@ -294,6 +311,40 @@ public class GuideScreen extends Screen {
         resetBarAnimation();
         resetStepAnswers();
         return new GuideScreen(Position.START, 1, onFinished);
+    }
+
+    /**
+     * 从 Verity 的配置里恢复各步骤的选择。
+     *
+     * <p>这些选择原本只存在静态字段里，重启游戏就全没了：第 1 步退回
+     * 「（请选择）」，第 2 步因为拿不到 Base URL 而永远报「无法判断该 API Key
+     * 的可用性」。配置本身是落盘的，所以在这里倒推回来。
+     *
+     * <p>只<b>补空</b>，不覆盖本轮已经选好的值：玩家在同一轮里改过的东西
+     * 比配置里的旧值更权威。所以每次补完都把 {@link #stepAnswersRestored} 置上，
+     * 一轮里只补一次。
+     */
+    private static void restoreAnswersFromConfig() {
+        if (stepAnswersRestored) return;
+        stepAnswersRestored = true;
+
+        VerityConfigManager.ConfigData data = VerityConfigManager.loadVerityConfig();
+        if (pickedProvider == null) {
+            String label = Providers.inferPickedLabel(data.provider, data.endpoint);
+            if (label != null) {
+                pickedProvider = label;
+                Log.info("[Guide] ANSWERS_RESTORED | LABEL=" + label
+                        + " | aiProvider=" + data.provider + " | aiEndpoint=" + data.endpoint);
+            }
+        }
+        // 自定义模式下把上次填的地址也带回来，否则第 2 步照样没有 Base URL
+        if (customEndpoint.isEmpty() && Providers.CUSTOM_LABEL.equals(pickedProvider)) {
+            customEndpoint = data.endpoint == null ? "" : data.endpoint;
+        }
+        // Key 也带回来：玩家重启后通常不想再粘一次
+        if (apiKeyText.isEmpty() && data.apiKey != null && !data.apiKey.isBlank()) {
+            apiKeyText = data.apiKey.trim();
+        }
     }
 
     /** 清空进度条的所有动画状态，让下一轮引导从头播放。 */
@@ -331,6 +382,8 @@ public class GuideScreen extends Screen {
         checkedApiKey = null;
         missingKeyHintUntilMs = 0L;
         registerLinkOpened = false;
+        // 新一轮：允许再从配置里补一次
+        stepAnswersRestored = false;
     }
     /** 第 {@code step} 步（1 起算）。 */
     public static GuideScreen step(int step, Runnable onFinished) {
@@ -1006,7 +1059,12 @@ public class GuideScreen extends Screen {
         } else {
             // 「（请选择）」的 provider 为 null，走不到这里（next() 已经拦住了）
             if (option.provider() != null) data.provider = option.provider();
-            if (option.endpoint() != null) data.endpoint = option.endpoint();
+            // endpoint 为 null 的两类情况，处理方式不同：
+            //   - 「自定义」以外、Verity 不读 endpoint 的（Gemini / GROQ / OpenRouter / Mistral）：
+            //     必须<b>清空</b>。沿用上一轮残留的地址会让配置里躺着一个
+            //     不属于当前提供商的 URL，玩家切到 Gemini 后配置里还写着 DeepSeek 的地址。
+            //   - ChatGPT 走 OPENAI 路径，它是有值的，正常写入。
+            data.endpoint = option.endpoint() == null ? "" : option.endpoint();
         }
         // 异步落盘 + 让 Verity 自己重载，不必重启
         VerityConfigManager.saveAll(data, data.provider);
@@ -1255,8 +1313,30 @@ public class GuideScreen extends Screen {
         }
     }
 
-    /** 玩家改了 Key。 */
+    /**
+     * 玩家改了 Key。
+     * <p>这里会把换行、回车这类控制字符<b>就地剔掉</b>：
+     * 玩家从网页或聊天记录里复制时经常会带上换行，而 {@code EditBox} 允许
+     * 粘贴多行（它只过滤掉 {@code < 0x20} 之外的东西），于是一段多行文字就
+     * 能进到 Key 里。带换行的 Key 会让 HTTP 头非法、请求根本发不出去，
+     * 与其事后报错，不如在进输入框的那一刻就当成「用户并不想要这些字符」。
+     */
     private void onApiKeyEdited(String text) {
+        String cleaned = ApiKeyValidator.sanitize(text);
+        if (!cleaned.equals(text)) {
+            // 含控制字符：把清洗后的结果写回去，输入框当场变干净。
+            // setValue 会同步回调进来，用标志挡住重入，否则 cleaned 再被清洗一次
+            // （第二次是等价的，只是白白多跑一轮）
+            if (!sanitizingApiKey) {
+                sanitizingApiKey = true;
+                try {
+                    if (apiKeyBox != null) apiKeyBox.setValue(cleaned);
+                } finally {
+                    sanitizingApiKey = false;
+                }
+            }
+            text = cleaned;
+        }
         apiKeyText = text;
         // 右侧按钮的字要跟着在「📋」与「×」之间切
         if (keyActionButton != null) {
@@ -1317,9 +1397,14 @@ public class GuideScreen extends Screen {
         // 期间又输入过：这次校验已经作废
         if (gen != ApiKeyValidator.currentGeneration()) return;
         if (baseUrl.isEmpty()) {
-            // 没有 Base URL 就没法查（理论上走不到：第 1 步已经拦过）
-            apiKeyCheck = new ApiKeyValidator.Result(ApiKeyValidator.Level.WARN,
-                    "无法判断该 API Key 的可用性", ApiKeyValidator.LinkTarget.NONE, null);
+            // 走到这里说明没拿到 Base URL，多半是第 1 步的提供商没恢复出来。
+            // 以前这里给的是「无法判断」，把真正的原因藏了起来——玩家会以为
+            // 是自己的 Key 有问题，实际上该回第 1 步重选提供商
+            Log.info("[Guide] API_KEY_CHECK_SKIPPED | REASON=NO_BASE_URL"
+                    + " | LABEL=" + pickedProvider);
+            apiKeyCheck = new ApiKeyValidator.Result(ApiKeyValidator.Level.ERROR,
+                    "未获取到 AI 接口地址，请先返回上一步重新选择提供商",
+                    ApiKeyValidator.LinkTarget.NONE, null);
             return;
         }
 

@@ -1,5 +1,7 @@
 package com.cb2495.verityplus.config;
 
+import com.cb2495.verityplus.util.Log;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -225,6 +227,14 @@ public final class Providers {
      * <p>DeepSeek / 智谱 / ChatGPT / OpenRouter / Mistral 走的都是 OpenAI 兼容接口，
      * Verity 侧只能填 {@code OPENAI}，靠 {@code aiEndpoint} 区分；
      * 只有 Gemini / GROQ 是独立枚举。
+     *
+     * <p><b>endpoint 什么时候留 null：</b>Verity 只对 {@code OPENAI} 读
+     * {@code aiEndpoint}。Gemini 走 {@code GoogleGenAiChatModel}、Mistral 走
+     * {@code MistralAiChatModel}、OpenRouter 与 GROQ 走 {@code OpenAiChatModel}
+     * 但 baseUrl 是写死的字符串——这四家的 builder 都不看 endpoint。
+     * 给它们写地址只会让玩家在 Verity 配置界面里看到一个不起作用的值、
+     * 还以为要改它，所以一律留 null，交给 Verity 自己的默认地址。
+     *
      * <p>每项的末尾三个地址是第 2 步（填 API Key）要用的跳转目标，
      * 顺序固定为：新建 Key / 充值 / 注册。
      */
@@ -247,25 +257,27 @@ public final class Providers {
                 "https://open.bigmodel.cn/console/apikeys",
                 "https://open.bigmodel.cn/console/finance",
                 "https://open.bigmodel.cn/login"));
-        // 地址用 OpenAI 官方的兼容端点：ChatGPT 没有独立的 API 域名，
-        // 平台上的 /v1 就是它的 Base URL
+        // ChatGPT 是 OPENAI 路径，aiEndpoint 对它是真的会被读，所以这里要写
         list.add(new PickerOption("ChatGPT", "能力顶尖，功能强大，价格偏高，国内无法正常访问",
                 OPENAI, "https://api.openai.com/v1", null,
                 "https://platform.openai.com/api-keys",
                 "https://platform.openai.com/settings/organization/billing/overview",
                 "https://platform.openai.com/signup"));
+        // Gemini：GoogleGenAiChatModel 不用 endpoint，留 null
         list.add(new PickerOption("Gemini", "聪慧（？），有免费额度，国内无法正常访问",
-                GEMINI, "https://generativelanguage.googleapis.com/v1beta", "已切换为 Gemini，但模型尚未配置",
+                GEMINI, null, "已切换为 Gemini，但模型尚未配置",
                 "https://aistudio.google.com/app/apikey",
                 "https://aistudio.google.com/app/billing",
                 "https://aistudio.google.com/"));
+        // OpenRouter：Verity 内部写死 https://openrouter.ai/api/v1/，留 null
         list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内可能无法稳定访问",
-                OPENAI, "https://openrouter.ai/api/v1", null,
+                OPENAI, null, null,
                 "https://openrouter.ai/settings/keys",
                 "https://openrouter.ai/settings/credits",
                 "https://openrouter.ai/sign-up"));
+        // Mistral：MistralAiChatModel 不用 endpoint，留 null
         list.add(new PickerOption("Mistral", "多语言表现佳，有免费额度，国内无法正常访问",
-                OPENAI, "https://api.mistral.ai/v1", null,
+                OPENAI, null, null,
                 "https://console.mistral.ai/api-keys/",
                 "https://console.mistral.ai/billing/",
                 "https://console.mistral.ai/"));
@@ -335,5 +347,86 @@ public final class Providers {
         PickerOption option = pickerOption(pickedLabel);
         if (option == null || option.isCustom() || option.isPlaceholder()) return null;
         return option;
+    }
+
+    /**
+     * 从 Verity 配置反推出玩家上次选的是哪一项。
+     *
+     * <p>引导的选择原本只活在内存里，重启游戏就没了——第 1 步会退回
+     * 「（请选择）」，第 2 步因为拿不到 Base URL 而永远报「无法判断」。
+     * 但配置本身一直在，所以重启后可以从 {@code aiProvider} + {@code aiEndpoint}
+     * 倒推出对应的那一项。
+     *
+     * <p><b>OPENAI 路径要特别小心。</b> DeepSeek / 智谱 / ChatGPT / OpenRouter /
+     * Mistral / 自定义在配置里都是 {@code aiProvider = OPENAI}，只能靠
+     * endpoint 区分。其中 OpenRouter 与 Mistral 我们故意不写 endpoint（Verity
+     * 不读它），于是它们的配置与「自定义」几乎一样——不能靠「有没有 endpoint」
+     * 判断，否则 Mistral 和自定义都会被错认成 OpenRouter。
+     *
+     * <p>匹配顺序：
+     * <ol>
+     *   <li>endpoint 与某一项<b>完全相等</b> —— DeepSeek / 智谱 / ChatGPT 走这条；</li>
+     *   <li>endpoint 为空：只可能是 OpenRouter 或 Mistral（这两家都不写），
+     *       优先按提供商标识判断，OPENAI 路径下再按<b>无法区分</b>处理；</li>
+     *   <li>endpoint 非空但对不上任何预置值 → 自定义；</li>
+     *   <li>非 OPENAI 路径（GEMINI / GROQ）直接按枚举值认。</li>
+     * </ol>
+     *
+     * @param provider {@code verity-common.toml} 里的 {@code aiProvider}
+     * @param endpoint {@code verity-common.toml} 里的 {@code aiEndpoint}
+     * @return 能对应上的列表项显示名；完全无法判断时返回 {@code null}
+     */
+    public static String inferPickedLabel(String provider, String endpoint) {
+        if (provider == null || provider.isBlank()) return null;
+        String id = provider.trim();
+        String url = endpoint == null ? "" : endpoint.trim();
+
+        // 1) endpoint 与某一项完全相等：这是唯一能区分 DeepSeek/智谱/ChatGPT 的依据
+        if (!url.isEmpty()) {
+            for (PickerOption option : pickerTemplate()) {
+                if (option.isPlaceholder()) continue;
+                if (!id.equals(option.provider())) continue;
+                if (url.equals(option.endpoint())) return option.label();
+            }
+            // 早期版本给 OpenRouter / Mistral 写过 endpoint（后来改成不写），
+            // 配置里可能还留着这些地址。它们不是「自定义」，玩家没填过东西——
+            // 认成自定义等于把玩家手打的地址看成一个他没填过的空壳
+            if (OPENAI.equals(id) && isLegacyBuiltinEndpoint(url)) {
+                Log.debug("[Providers] LEGACY_ENDPOINT_IGNORED | URL=" + url);
+                return null;
+            }
+            // 2) 有 endpoint 但对不上任何预置值 → 玩家自己填的
+            if (OPENAI.equals(id)) return CUSTOM_LABEL;
+        }
+
+        // 3) endpoint 为空：只可能是不写 endpoint 的那几家
+        for (PickerOption option : pickerTemplate()) {
+            if (option.isPlaceholder()) continue;
+            if (!id.equals(option.provider())) continue;
+            if (option.endpoint() != null) continue;
+            // OPENAI 路径下有多个候选（OpenRouter / Mistral），无法从配置区分；
+            // 取列表中靠前的那个不如返回 null 让玩家重选，免得替他猜错一家
+            if (OPENAI.equals(id)) return null;
+            return option.label();
+        }
+
+        return null;
+    }
+
+    /** 该提供商在 Verity 侧是否需要玩家填 endpoint（只有 OPENAI 路径需要）。 */
+    public static boolean needsEndpoint(String provider) {
+        return OPENAI.equals(provider);
+    }
+
+    /**
+     * 这个地址是不是「以前被我们写进配置、现在不该写了」的内建地址。
+     * <p>只认 Verity 内部写死的那几家（OpenRouter / Mistral），
+     * 玩家真填了这个值当自定义也无所谓——反正结论都是「无法从配置判断，重选」。
+     */
+    private static boolean isLegacyBuiltinEndpoint(String url) {
+        String lower = url.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith("/")) lower = lower.substring(0, lower.length() - 1);
+        return lower.equals("https://openrouter.ai/api/v1")
+                || lower.equals("https://api.mistral.ai/v1");
     }
 }

@@ -52,9 +52,13 @@ final class ApiKeyValidator {
     /** 模型清单最多记多少字节：防止拿一个巨大的响应把内存和磁盘写满。 */
     private static final int MAX_BODY_BYTES = 1 << 20;
 
-    /** 模型清单的落盘位置，相对于游戏目录。 */
+    /**
+     * 模型清单的落盘位置，相对于游戏目录。
+     * <p>必须带 {@code .txt} 后缀：缓存目录里已有的就是这个名字，
+     * 写成 {@code ai_models} 会让第 3 步读到另一个不存在的文件。
+     */
     static final String MODELS_DIR = ".cache/verity_plus";
-    static final String MODELS_FILE = "ai_models";
+    static final String MODELS_FILE = "ai_models.txt";
 
     /** 校验结论。 */
     enum Level {
@@ -132,6 +136,37 @@ final class ApiKeyValidator {
     // ---------- 地址拼装 ----------
 
     /**
+     * 验 Key 要打的那家公司地址。
+     *
+     * <p><b>为什么不能直接用 {@code aiEndpoint}：</b>Verity 只对
+     * {@code OPENAI}（ChatGPT 与自定义）读 {@code aiEndpoint}；Gemini 走
+     * {@code GoogleGenAiChatModel}、Mistral 走 {@code MistralAiChatModel}、
+     * OpenRouter 与 GROQ 走硬编码地址，这四家的 builder 根本不看 endpoint，
+     * 所以我们也不该往配置里写（见 {@code Providers} 里那几项的 endpoint 为 null）。
+     * 但验 Key 是我们自己发的 HTTP 请求，必须有一个真实地址，于是按这里补齐。
+     *
+     * <p>这些值必须与 Verity {@code LLMBuilder} 里的硬编码保持一致，改 Verity 版本时要回来对一遍。
+     */
+    static String defaultBaseUrl(String pickedLabel) {
+        Providers.PickerOption option = Providers.pickerOption(pickedLabel);
+        if (option == null) return "";
+        String name = option.label();
+        return switch (name) {
+            // Verity: new OpenAiChatModel.builder().baseUrl("https://openrouter.ai/api/v1/")
+            case "OpenRouter" -> "https://openrouter.ai/api/v1";
+            // Verity: new OpenAiChatModel.builder().baseUrl("https://api.groq.com/openai/v1/")
+            case "GROQ" -> "https://api.groq.com/openai/v1";
+            // Verity: GoogleGenAiChatModel —— 不接受自定义端点，固定走 Google 官方
+            // 用 generativelanguage 而不是 AiProvider 里的占位值 https://api.gemini.com
+            // （那个是给配置界面显示的默认值，GoogleGenAiChatModel 实际不用它）
+            case "Gemini" -> "https://generativelanguage.googleapis.com/v1beta";
+            // Verity: MistralAiChatModel —— 同样不接受自定义端点
+            case "Mistral" -> "https://api.mistral.ai/v1";
+            default -> "";
+        };
+    }
+
+    /**
      * 校验请求要打的完整地址。
      *
      * <p><b>OpenRouter 例外：</b>它的 {@code /models} 是<b>公开</b>接口，
@@ -141,7 +176,7 @@ final class ApiKeyValidator {
      * 代价是它不返回模型清单，那一步的清单就取不到了（清单本来也能从
      * 公开的 {@code /models} 单独拿，但那是另一个请求，这里不做）。
      *
-     * @param baseUrl  AI 的 Base URL（第 1 步写进配置的那个）
+     * @param baseUrl  AI 的 Base URL（预置提供商取 {@link #defaultBaseUrl}）
      * @param apiKey   玩家填的 Key
      * @param gemini   是否走 Gemini 的 {@code ?key=} 鉴权
      * @param provider 提供商标识（{@code OPENAI} / {@code GEMINI} / …），用于识别例外
@@ -194,6 +229,66 @@ final class ApiKeyValidator {
         return idx < 0 ? url : url.substring(0, idx + 1) + "key=***";
     }
 
+    // ---------- 字符校验 ----------
+
+    /**
+     * Key 里是否含有控制字符（换行、回车、制表符、其他 {@code < 0x20} 的字符）。
+     *
+     * <p>这一条是<b>必须</b>拦的，不只是「看起来不对」：HTTP 头值里不允许出现
+     * 换行，JDK 的 {@code MessageHeader} 会直接抛
+     * {@code IllegalArgumentException: Illegal character(s) in message header value}。
+     * 玩家不小心粘贴了多行文本时，异常消息只显示第一行，很容易被误读成
+     * 「Key 写错了」——实际是请求根本没发出去。
+     */
+    static boolean hasControlChar(String key) {
+        if (key == null) return false;
+        for (int i = 0; i < key.length(); i++) {
+            if (key.charAt(i) < 0x20) return true;
+        }
+        return false;
+    }
+
+    /** Key 里是否含有非 ASCII 字符。各家服务商的 Key 都是纯 ASCII。 */
+    static boolean hasNonAscii(String key) {
+        if (key == null) return false;
+        for (int i = 0; i < key.length(); i++) {
+            if (key.charAt(i) > 0x7E) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 发请求之前的格式预检。
+     *
+     * @return 有问题时返回红色结论；没问题返回 {@code null}
+     */
+    static Result checkFormat(String apiKey) {
+        if (hasControlChar(apiKey)) {
+            return new Result(Level.ERROR, "API Key 中不能包含换行或空格",
+                    LinkTarget.NONE, null);
+        }
+        if (hasNonAscii(apiKey)) {
+            return new Result(Level.ERROR, "API Key 格式不正确（含非法字符）",
+                    LinkTarget.NONE, null);
+        }
+        return null;
+    }
+
+    /**
+     * 把 Key 清洗成能安全放进 HTTP 头的样子。
+     * <p>只在格式预检没拦下来的情况下用，属于第二道保险：
+     * 去掉所有控制字符，保证拼接请求头时不会抛异常。
+     */
+    static String sanitize(String apiKey) {
+        if (apiKey == null) return "";
+        StringBuilder sb = new StringBuilder(apiKey.length());
+        for (int i = 0; i < apiKey.length(); i++) {
+            char c = apiKey.charAt(i);
+            if (c >= 0x20) sb.append(c);
+        }
+        return sb.toString().trim();
+    }
+
     // ---------- 后台校验 ----------
 
     /** 每次发起校验就递增，用于丢弃过期的结果。 */
@@ -223,15 +318,27 @@ final class ApiKeyValidator {
         ConfigIO.run(() -> {
             Result result;
             Path savedPath = null;
-            try {
-                Outcome outcome = check(baseUrl, apiKey, gemini, provider);
-                result = outcome.result();
-                if (outcome.body() != null) {
-                    savedPath = saveModels(outcome.body());
+            // 先做字符预检：含换行/中文的 Key 直接判红，不发请求。
+            // 不拦的话，换行会让 getResponseCode 抛 IllegalArgumentException，
+            // 落进下面的 CRASHED 分支变成含糊的「无法判断」
+            Result formatProblem = checkFormat(apiKey);
+            if (formatProblem != null) {
+                Log.info("[ApiKeyCheck] FORMAT=FAILED | REASON="
+                        + (hasControlChar(apiKey) ? "CONTROL_CHAR" : "NON_ASCII")
+                        + " | LENGTH=" + (apiKey == null ? 0 : apiKey.length())
+                        + " | VERDICT=" + formatProblem.level());
+                result = formatProblem;
+            } else {
+                try {
+                    Outcome outcome = check(baseUrl, apiKey, gemini, provider);
+                    result = outcome.result();
+                    if (outcome.body() != null) {
+                        savedPath = saveModels(outcome.body());
+                    }
+                } catch (RuntimeException e) {
+                    Log.warn("[ApiKeyCheck] CHECK=CRASHED | ERROR=" + e);
+                    result = Result.retryable(Level.WARN, "无法判断该 API Key 的可用性");
                 }
-            } catch (RuntimeException e) {
-                Log.warn("[ApiKeyCheck] CHECK=CRASHED | ERROR=" + e);
-                result = Result.retryable(Level.WARN, "无法判断该 API Key 的可用性");
             }
             Result finalResult = result;
             Path finalPath = savedPath;
@@ -264,7 +371,9 @@ final class ApiKeyValidator {
             conn.setRequestProperty("User-Agent", "VerityPlus-ApiKeyCheck/1.0");
             conn.setRequestProperty("Accept", "application/json");
             if (!gemini) {
-                conn.setRequestProperty("Authorization", "Bearer " + apiKey.trim());
+                // sanitize 是第二道保险：走到这里时预检已经保证没有控制字符，
+                // 万一将来有别的调用路径绕开预检，也不会因为换行抛出 IllegalArgumentException
+                conn.setRequestProperty("Authorization", "Bearer " + sanitize(apiKey));
             }
 
             int code = conn.getResponseCode();
@@ -449,14 +558,21 @@ final class ApiKeyValidator {
     }
 
     /**
-     * 第 1 步的 Base URL。
-     * <p>自定义取玩家填的地址，预置提供商取注册表里的地址；
-     * 两者都没有时返回空串（调用方不该在那种情况下发请求）。
+     * 第 2 步验 Key 要用的 Base URL。
+     * <ul>
+     *   <li>自定义：玩家自己填的地址；</li>
+     *   <li>ChatGPT：注册表里的 OpenAI 官方地址（{@code aiEndpoint} 对它是有用的）；</li>
+     *   <li>DeepSeek / 智谱：注册表里的地址；</li>
+     *   <li>Gemini / Mistral / OpenRouter / GROQ：Verity 内部写死，见 {@link #defaultBaseUrl}。</li>
+     * </ul>
      */
     static String baseUrlFor(String pickedLabel, String customEndpoint) {
         Providers.PickerOption option = Providers.pickerOption(pickedLabel);
         if (option == null) return "";
         if (option.isCustom()) return customEndpoint == null ? "" : customEndpoint.trim();
+        // 这几家的 endpoint 在注册表里是 null（写了也白写），用内建的地址补上
+        String builtin = defaultBaseUrl(pickedLabel);
+        if (!builtin.isEmpty()) return builtin;
         return option.endpoint() == null ? "" : option.endpoint();
     }
 
