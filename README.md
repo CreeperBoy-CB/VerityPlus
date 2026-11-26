@@ -183,7 +183,7 @@ gradlew.bat build
 产物在 `build/libs/`，文件名形如：
 
 ```
-[Verity拓展增强]verityplus'2.9.9'-2.9.9.jar
+[Verity拓展增强]verityplus'3.0-preview'-3.0-preview.jar
 ```
 
 ### 单独运行客户端
