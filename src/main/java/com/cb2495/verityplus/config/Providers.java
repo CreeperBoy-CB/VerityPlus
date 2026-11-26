@@ -242,7 +242,7 @@ public final class Providers {
         List<PickerOption> list = new ArrayList<>();
         list.add(new PickerOption(PICKER_PLACEHOLDER, "选择一个你中意的 AI 提供商",
                 null, null, null, "", "", ""));
-        list.add(new PickerOption("GROQ", "试玩首选（仅国外），极速输出，有免费额度，国内可能无法稳定访问",
+        list.add(new PickerOption("GROQ", "极速输出，有免费额度，国内无法正常访问",
                 GROQ, null, "已切换为 GROQ，但模型尚未配置",
                 "https://console.groq.com/keys",
                 "https://console.groq.com/settings/billing",
@@ -270,7 +270,7 @@ public final class Providers {
                 "https://aistudio.google.com/app/billing",
                 "https://aistudio.google.com/"));
         // OpenRouter：Verity 内部写死 https://openrouter.ai/api/v1/，留 null
-        list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内可能无法稳定访问",
+        list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内可访问但延迟较高",
                 OPENAI, null, null,
                 "https://openrouter.ai/settings/keys",
                 "https://openrouter.ai/settings/credits",
@@ -309,19 +309,20 @@ public final class Providers {
         if (!simplifiedChinese) return new ArrayList<>(all);
 
         PickerOption placeholder = all.get(0);
-        // 组 1：国内可直接用
+        // 组 1：国内可直接用 —— API 延迟与国内服务同级（实测百毫秒级）
         List<PickerOption> local = List.of(all.get(2), all.get(3));          // DeepSeek, 智谱
-        // 组 2：国内可能无法稳定访问
-        List<PickerOption> unstable = List.of(all.get(1), all.get(6));       // GROQ, OpenRouter
-        // 组 3：国内无法正常访问
-        List<PickerOption> blocked = List.of(all.get(4), all.get(5), all.get(7)); // ChatGPT, Gemini, Mistral
+        // 组 2：能连但很慢 —— 实测可访问，延迟却是国内服务的二十倍上下
+        List<PickerOption> slow = List.of(all.get(6));                       // OpenRouter
+        // 组 3：国内无法正常访问 —— 实测 API 或控制台被拒（403 / 超时）
+        List<PickerOption> blocked = List.of(all.get(1), all.get(4), all.get(5), all.get(7));
+        //                                                                     GROQ, ChatGPT, Gemini, Mistral
         // 组 4：自定义
         List<PickerOption> custom = List.of(all.get(8));
 
         List<PickerOption> options = new ArrayList<>();
         options.add(placeholder);
         options.addAll(local);
-        options.addAll(unstable);
+        options.addAll(slow);
         options.addAll(blocked);
         options.addAll(custom);
         return options;
