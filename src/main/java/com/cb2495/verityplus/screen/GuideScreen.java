@@ -14,9 +14,9 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.fml.ModList;
-import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -161,12 +161,6 @@ public class GuideScreen extends Screen {
     private static String checkedApiKey = null;
 
     /**
-     * 「请先填入 API Key！」这句红字的到期时刻（毫秒）。
-     * <p>5 秒后自己消失，不需要玩家去点一下才清掉。
-     */
-    private static long missingKeyHintUntilMs = 0L;
-
-    /**
      * 第 2 步的 API Key 输入框。
      * <p>它只在第 2 步存在，其余页恒为 {@code null}。
      */
@@ -196,7 +190,7 @@ public class GuideScreen extends Screen {
     private boolean sanitizingApiKey = false;
 
     /** 主按钮（开始 / 确认 / 继续 / 完成）的引用：第 2 步要按 Key 的结论置灰。 */
-    private Button mainButton;
+    private GuideButton mainButton;
 
     /** 等到点要发起的 Key 校验的时间戳；{@code <= 0} 表示当前没有排队的校验。 */
     private long pendingKeyCheckAt = 0L;
@@ -380,7 +374,6 @@ public class GuideScreen extends Screen {
         apiKeyText = "";
         apiKeyCheck = null;
         checkedApiKey = null;
-        missingKeyHintUntilMs = 0L;
         registerLinkOpened = false;
         // 新一轮：允许再从配置里补一次
         stepAnswersRestored = false;
@@ -495,10 +488,12 @@ public class GuideScreen extends Screen {
 
         int mainY = showSkip ? startY : buttonY;
 
-        Button main = Button.builder(mainLabel, btn -> next())
-                .pos(centerX, mainY).size(BUTTON_WIDTH, BUTTON_HEIGHT).build();
-        this.mainButton = main;
-        this.addRenderableWidget(main);
+        // 主按钮用自定义子类：它能在「条件不满足」时画成灰的、悬停给出原因，
+        // 同时仍然接收点击（原版的 active=false 会让按钮完全不响应鼠标，
+        // 玩家点了没反应、也说不清为什么）
+        this.mainButton = new GuideButton(centerX, mainY, BUTTON_WIDTH, BUTTON_HEIGHT,
+                mainLabel, btn -> next());
+        this.addRenderableWidget(this.mainButton);
 
         if (showSkip) {
             // 原版按钮本身就是灰底，这里把文字改成白色
@@ -517,7 +512,7 @@ public class GuideScreen extends Screen {
 
         // 第 1 步自己的控件：提供商下拉框、Ollama 入口、自定义 Endpoint 输入框
         if (position == Position.STEP && step == STEP_PROVIDER) {
-            initProviderPicker(buttonY);
+            initProviderPicker();
         }
 
         // 第 2 步自己的控件：API Key 输入框、右侧的「粘贴 / 清空」按钮
@@ -585,31 +580,20 @@ public class GuideScreen extends Screen {
         switch (position) {
             case START -> mc.setScreen(GuideScreen.step(1, onFinished));
             case STEP -> {
-                // 第 1 步要先选好提供商：没选就往下走，下一步会拿着空配置继续，
-                // 玩家到最后才发现前面白填。（可点金色细条跳页，那条路不校验。）
                 if (step == STEP_PROVIDER) {
-                    if (!providerChosen()) {
-                        showProviderHint("请先选择一个提供商", COLOR_WARN);
+                    // 条件不满足时按钮本来就画成灰的、悬停有 tooltip 说明原因。
+                    // 这里再拦一次是防御：玩家可能用键盘回车之类别的路子触发
+                    String reason = providerStepBlockReason();
+                    if (reason != null) {
+                        Log.debug("[Guide] CONFIRM_BLOCKED | BY=PROVIDER_STEP | REASON=" + reason);
+                        showProviderHint(reason, COLOR_WARN);
                         return;
                     }
-                    // 自定义网址校验没通过（红）或还在验证（黄）时不许往下走。
-                    // 按住 Ctrl 可以强行通过：玩家可能就是想先配完再回来改。
-                    if (endpointCheckBlocksNext() && !forceNextHeld()) {
-                        Log.debug("[Guide] CONFIRM_BLOCKED | BY=ENDPOINT_CHECK | VERDICT=" + endpointCheck.level());
-                        showProviderHint(endpointCheckBlockedHint(), COLOR_WARN);
-                        return;
-                    }
-                    // 按住 Ctrl 绕过了校验：记一条日志，排查时能对上是玩家主动跳过
-                    if (endpointCheckBlocksNext()) {
-                        Log.info("[Guide] CONFIRM_FORCED | BY=CTRL | VERDICT=" + endpointCheck.level()
-                                + " | INPUT=" + customEndpoint);
-                    }
-                    // Ctrl 强制通过时，地址还没验证过；仍然把填的内容写进配置，
-                    // 否则玩家强过一步反而丢了刚输入的地址
                     if (!commitProviderChoice()) return;
                 }
                 if (step == STEP_API_KEY && !commitApiKey()) return;
-                if (step >= GameState.STEPS) {                    mc.setScreen(GuideScreen.finish(onFinished));
+                if (step >= GameState.STEPS) {
+                    mc.setScreen(GuideScreen.finish(onFinished));
                 } else {
                     mc.setScreen(GuideScreen.step(step + 1, onFinished));
                 }
@@ -816,27 +800,32 @@ public class GuideScreen extends Screen {
     }
 
     /**
-     * 当前状态是否禁止「下一步」。
-     * <p>只有红（格式错 / 404 / 403）与黄（正在验证）拦人，由
-     * {@link EndpointValidator.Result#blocksNext()} 判定。
+     * 第 1 步现在为什么不能继续；能继续时返回 {@code null}。
+     *
+     * <p>这个字符串同时驱动两处：按钮画成灰的、以及悬停时 tooltip 的内容。
+     * 两处共用一个来源，就不会出现「按钮是灰的但 tooltip 说不出原因」
+     * 或者「tooltip 说的和实际拦人的条件不一致」。
+     *
+     * <p>不再提供 Ctrl 强制通过：按钮一灰，玩家就没有「绕过去」这个选项了，
+     * 明确拦住、讲清原因比留一条隐蔽的后路更好。
      */
-    private boolean endpointCheckBlocksNext() {
-        return customMode() && endpointCheck != null && endpointCheck.blocksNext();
-    }
+    private String providerStepBlockReason() {
+        if (!providerChosen()) {
+            return "请先选择一个提供商";
+        }
+        if (!customMode()) return null;
 
-    /** 被拦下时给出的说明，告诉玩家还有 Ctrl 这条后路。 */
-    private String endpointCheckBlockedHint() {
-        return "网址未通过验证，无法继续（按住 Ctrl 点击「确认」可强制通过）";
-    }
-
-    /**
-     * 「确认」这一次点击是否按住了 Ctrl。
-     * <p>从窗口当前的修饰键状态读，而不是靠事件参数：按钮回调拿不到它。
-     */
-    private boolean forceNextHeld() {
-        long handle = Minecraft.getInstance().getWindow().getWindow();
-        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
-                || GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+        String endpoint = endpointBox != null ? endpointBox.getValue().trim() : customEndpoint.trim();
+        if (endpoint.isEmpty()) {
+            return "请填入 AI Endpoint";
+        }
+        if (endpointCheck == null) return null;
+        return switch (endpointCheck.level()) {
+            case PENDING -> "正在验证网址，请稍候……";
+            case ERROR -> "网址未通过验证：" + endpointCheck.message();
+            // WARN / OK 都放行：橙色的「说不准」不该把玩家卡死在这一页
+            default -> null;
+        };
     }
 
     /** 点击是否落在「[点击此处]重新尝试」上。 */
@@ -852,12 +841,12 @@ public class GuideScreen extends Screen {
     /**
      * 第 1 步的控件布局。
      * <p>表格是自绘的（见 {@link #renderProviderList}），这里只放真正需要
-     * 事件系统的控件：自定义模式的 Endpoint 输入框、「确认」。
+     * 事件系统的控件：自定义模式的 Endpoint 输入框。
+     * <p>「确认」不在这里建——它由 {@code init()} 统一创建为主按钮，
+     * 这样条件不满足时才能变灰并给出说明（见 {@link GuideButton}）。
      * <p>原来那个 240px 宽的下拉框铺不满屏幕，换成了一整块两列的滚动表格。
      */
-    private void initProviderPicker(int buttonY) {
-        int centerX = this.width / 2;
-
+    private void initProviderPicker() {
         // 自定义模式：输入框<b>盖住「自定义」那一项的介绍文字</b>，
         // 位置和长度都与右列完全一致，看起来像那一行的介绍变成了输入框
         if (customMode()) {
@@ -882,10 +871,10 @@ public class GuideScreen extends Screen {
             this.endpointBox = null;
         }
 
-        // 「确认」放在按钮区最下面那一行的位置，和其它页的主按钮齐平
-        this.addRenderableWidget(Button.builder(Component.literal("确认"), btn -> next())
-                .pos(centerX - BUTTON_WIDTH / 2, buttonY)
-                .size(BUTTON_WIDTH, BUTTON_HEIGHT).build());
+        // 注意：这里<b>不要</b>再建一个「确认」按钮。
+        // init() 里已经建好主按钮（GuideButton），位置就是这一行；
+        // 再建一个会把那个能变灰、带说明的按钮完全盖住——
+        // 玩家看到的是这个普通按钮，条件不满足时它当然不会变灰。
     }
 
     /**
@@ -1159,9 +1148,6 @@ public class GuideScreen extends Screen {
     /** 输入框与功能按钮之间的间隙。 */
     private static final int KEY_ACTION_GAP = 4;
 
-    /** 「请先填入API Key！」这句提示显示多久（毫秒）。 */
-    private static final long MISSING_KEY_HINT_MS = 5000L;
-
     /** 功能按钮的两个状态的文字。用字体里现成的符号，不依赖彩色 emoji。 */
     private static final String KEY_ACTION_PASTE = "📋";
     private static final String KEY_ACTION_CLEAR = "×";
@@ -1185,7 +1171,7 @@ public class GuideScreen extends Screen {
         int boxLeft = apiKeyBoxLeft();
         int boxTop = apiKeyBoxY();
 
-        EditBox box = new GreenBorderedEditBox(this.font, boxLeft, boxTop, boxWidth,
+        ApiKeyEditBox box = new ApiKeyEditBox(this.font, boxLeft, boxTop, boxWidth,
                 API_KEY_BOX_HEIGHT, Component.literal("API Key"));
         // Key 一般几十个字符，留到 512 足够放下任何一家
         box.setMaxLength(512);
@@ -1473,16 +1459,6 @@ public class GuideScreen extends Screen {
         return option == null || option.provider() == null ? "" : option.provider();
     }
 
-    /** 第 2 步要显示的那一行结论；{@code null} 表示不显示。 */
-    private ApiKeyValidator.Result effectiveApiKeyCheck() {
-        // 「请先填入 API Key！」的优先级最高：它是玩家刚触发的、有时效的提醒
-        if (System.currentTimeMillis() < missingKeyHintUntilMs) {
-            return new ApiKeyValidator.Result(ApiKeyValidator.Level.ERROR,
-                    "请先填入API Key！", ApiKeyValidator.LinkTarget.NONE, null);
-        }
-        return currentApiKeyCheck();
-    }
-
     /**
      * 点「继续」时把 Key 写进配置。
      *
@@ -1491,8 +1467,8 @@ public class GuideScreen extends Screen {
     private boolean commitApiKey() {
         String key = apiKeyText.trim();
         if (key.isEmpty()) {
-            // 空着就点：输入框变红 + 留空内和按键下方同时出现红字，5 秒后自己消失
-            missingKeyHintUntilMs = System.currentTimeMillis() + MISSING_KEY_HINT_MS;
+            // 兜底：按钮此时是灰的，正常点不到；回车键那条路仍会到这里。
+            // 原因已经通过按钮的 tooltip 在说了，这里只记一条日志
             Log.info("[Guide] API_KEY_MISSING | STEP=" + step);
             return false;
         }
@@ -1520,6 +1496,29 @@ public class GuideScreen extends Screen {
                 + " | LENGTH=" + key.length());
     }
 
+    /** 上一次记过日志的拦截原因，避免每帧刷屏。 */
+    private String lastLoggedBlockReason = null;
+
+    /**
+     * 第 2 步现在为什么不能继续；能继续时返回 {@code null}。
+     * <p>与 {@link #providerStepBlockReason()} 同一套用法：按钮灰态与 tooltip 共用。
+     */
+    private String apiKeyBlockReason() {
+        // 空着时「继续」变灰，原因交给 tooltip 说明。
+        // 原来这里是「空着不拦、点一下弹红字」，但按钮一旦变灰就收不到点击，
+        // 那句红字永远不会出现——所以改成和其余条件一样，用灰按钮 + 悬停提示。
+        if (apiKeyText.trim().isEmpty()) {
+            return "请先填入API Key！";
+        }
+        ApiKeyValidator.Result result = currentApiKeyCheck();
+        if (result == null) return null;
+        return switch (result.level()) {
+            case ERROR -> "该 API Key 无效，请检查后重试";
+            case PENDING -> "正在检查 API Key，请稍候……";
+            default -> null;
+        };
+    }
+
     /** 打开一个网址；没有地址时什么都不做。 */
     private static void openUrl(String url) {
         if (url == null || url.isBlank()) return;
@@ -1528,20 +1527,6 @@ public class GuideScreen extends Screen {
         } catch (RuntimeException e) {
             Log.warn("[Guide] OPEN_URL_FAILED | URL=" + url + " | ERROR=" + e);
         }
-    }
-
-    /**
-     * 「继续」是否可点：黄（检查中）与红（Key 无效）置灰，其余放行。
-     *
-     * <p><b>输入框为空时要保持可点。</b> 需求里写的是「点击时 API Key 留空，
-     * 则让输入框变红 + 出现红字」——按钮要是先被置灰，这个点击根本到不了
-     * {@link #commitApiKey()}，那句提示就永远出不来。置灰 ≠ 禁用逻辑，
-     * 真正的拦截在 {@link #commitApiKey()} 里。
-     */
-    private boolean apiKeyContinueEnabled() {
-        if (apiKeyText.trim().isEmpty()) return true;
-        ApiKeyValidator.Result result = currentApiKeyCheck();
-        return result == null || !result.blocksNext();
     }
 
     /** 第 2 步点「[点击此处]」时该去哪里。 */
@@ -1582,18 +1567,11 @@ public class GuideScreen extends Screen {
         } else {
             clearLink(keyRegisterLink);
         }
-
-        // 空着点「继续」时，除了留空内那句红字，按键下方再来一处，
-        // 因为玩家的视线那时在按钮上
-        if (System.currentTimeMillis() < missingKeyHintUntilMs) {
-            graphics.drawCenteredString(this.font, Component.literal("请先填入API Key！"),
-                    centerX, providerHintY(), COLOR_WARN);
-        }
     }
 
     /** 留空内那行结论：图标 + 文字 + 可选的「[点击此处]」。 */
     private void renderApiKeyStatus(GuiGraphics graphics) {
-        ApiKeyValidator.Result result = effectiveApiKeyCheck();
+        ApiKeyValidator.Result result = currentApiKeyCheck();
         if (result == null) {
             clearLink(keyStatusLink);
             return;
@@ -2603,15 +2581,51 @@ public class GuideScreen extends Screen {
         // 停止输入满 2 秒就发起探活
         if (position == Position.STEP && step == STEP_PROVIDER) {
             tickEndpointCheck();
+            // 第 1 步的「确认」：条件不满足时画成灰的 + 悬停说明原因。
+            // 放在 tick 里每帧对一次，异步的网址校验结论一变就能跟上
+            if (mainButton != null) {
+                String reason = providerStepBlockReason();
+                if (!java.util.Objects.equals(reason, lastLoggedBlockReason)) {
+                    lastLoggedBlockReason = reason;
+                    if (reason != null) {
+                        Log.info("[Guide] BUTTON_BLOCKED | REASON=" + reason
+                                + " | picked=" + pickedProvider);
+                    }
+                }
+                mainButton.setBlockedReason(reason);
+            }
         }
         if (position == Position.STEP && step == STEP_API_KEY) {
             tickApiKeyCheck();
-            // 校验结论会在异步回调里变，按钮的可用性跟着它走，
-            // 放在 tick 里每帧对一次，就不用担心漏掉哪条更新路径
+            // 校验结论会在异步回调里变，按钮跟着它走
             if (mainButton != null) {
-                mainButton.active = apiKeyContinueEnabled();
+                mainButton.setBlockedReason(apiKeyBlockReason());
             }
+            // 「正在请求服务器」的那段时间把 Key 打码：此刻输入框里是一个
+            // 真实可用的凭证，不该整段露在外面。等待防抖（还没发请求）也算在内——
+            // 那正是玩家刚填完、最可能截图或被人看到的一刻。
+            ApiKeyEditBox.setMasking(apiKeyShouldMask());
         }
+    }
+
+    /**
+     * 输入框现在要不要打码。
+     *
+     * <p>规则：<b>除了防抖等待那 2 秒，其余时间一律打码</b>。
+     * 打码显示成「前 4 位 + *** + 后 2 位」，玩家仍能认出这是不是自己那把 Key，
+     * 但旁边的人或截图拿到的是不完整的内容。
+     *
+     * <p>防抖窗口之所以例外，是因为那是玩家刚敲完、正在核对输入的瞬间，
+     * 遮起来等于让他没法确认自己填对了没有。
+     */
+    private boolean apiKeyShouldMask() {
+        // 还没有任何内容：不打码（空输入框打不打都一样，省得来回切）
+        if (apiKeyText.trim().isEmpty()) return false;
+        // 防抖窗口：明文
+        if (pendingKeyCheckAt > 0L && System.currentTimeMillis() < pendingKeyCheckAt) {
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -2718,6 +2732,120 @@ public class GuideScreen extends Screen {
 
 
     /**
+     * 主按钮。
+     *
+     * <p>比原版 {@link Button} 多一个「因为条件不满足而不可点」的状态。它和
+     * {@code active = false} 的区别很重要：
+     * <ul>
+     *   <li>{@code active = false} 会让按钮<b>完全不响应鼠标</b>——点了没反应，
+     *       玩家不知道是自己点错了还是有别的原因；</li>
+     *   <li>这个状态只把外观画成灰的，点击照收，由 {@code next()} 给出说明。</li>
+     * </ul>
+     *
+     * <p><b>tooltip 必须能显示。</b> 原版 {@code AbstractWidget} 渲染 tooltip 的条件是
+     * {@code isHovered() || isFocused()}，与 {@code active} 无关；所以置灰后
+     * 悬停提示仍然会出来——这正是「灰按钮 + 说明原因」能同时成立的原因。
+     * 若改用 {@code active = false}，tooltip 同样能显示，但按钮就点不动了。
+     */
+    private static final class GuideButton extends Button {
+
+        /** 当前不能继续的原因；{@code null} 表示可以继续。 */
+        private String blockedReason = null;
+
+        GuideButton(int x, int y, int width, int height, Component message, OnPress onPress) {
+            super(x, y, width, height, message, onPress, DEFAULT_NARRATION);
+        }
+
+        /**
+         * 每帧按当前条件刷新。
+         *
+         * @param reason 不能继续的原因；{@code null} 表示可以继续
+         */
+        void setBlockedReason(String reason) {
+            if (java.util.Objects.equals(this.blockedReason, reason)) return;
+            this.blockedReason = reason;
+            this.setTooltip(reason == null ? null : Tooltip.create(Component.literal(reason)));
+            // 直接改 active：这才是原版禁用的正经开关，
+            // 贴图换成行 0 的灰皮、文字换成 0xA0A0A0，和游戏里其它不可点的按钮一致。
+            //
+            // 之所以敢直接改（而不是在 renderWidget 里临时改再还原）：
+            // active=false 只影响两件事——绘制时贴图/文字变灰，以及 mouseClicked
+            // 直接返回 false。后一条我们不需要：按钮被拦住时本来就不该触发下一步，
+            // 而"为什么不能继续"是通过 tooltip 说明的，tooltip 只看 isHovered()、
+            // 与 active 无关，所以照样会显示。
+            this.active = reason == null;
+        }
+
+        /** 当前是否处于「条件不满足」的灰态。 */
+        boolean isBlocked() {
+            return blockedReason != null;
+        }
+    }
+
+    /**
+     * API Key 输入框（第 2 步专用）。
+     *
+     * <p>平时<b>明文显示</b>——玩家需要能看清自己填了什么、粘错了没有。
+     * 只有「正在拿这个 Key 去请求服务器」的那段时间才打码成
+     * {@code 前4位 + *** + 后2位}：那时输入框里躺着一个真实可用的凭证，
+     * 万一被旁人看到、或者玩家自己截了图，暴露的就是完整 Key。
+     *
+     * <p>打码靠 {@link EditBox#setFormatter}：它在绘制前把要画的文字交给回调，
+     * 由回调决定最终画什么。注意回调拿到的是<b>从滚动位置开始的可见片段</b>，
+     * 第二个参数 {@code displayPos} 就是那个起点，所以要按它换算下标。
+     */
+    private static final class ApiKeyEditBox extends GreenBorderedEditBox {
+
+        /** 是否处于「请求中」的掩码状态。由 {@link GuideScreen} 每帧设置。 */
+        private static boolean masking = false;
+
+        /** 掩码时保留明文的头部长度。 */
+        private static final int PREFIX_KEEP = 4;
+        /** 掩码时保留明文的尾部长度。 */
+        private static final int SUFFIX_KEEP = 2;
+
+        static void setMasking(boolean value) {
+            masking = value;
+        }
+
+        ApiKeyEditBox(net.minecraft.client.gui.Font font, int x, int y, int width, int height,
+                      Component message) {
+            super(font, x, y, width, height, message);
+            setFormatter(this::format);
+        }
+
+        /**
+         * 把{@code text}按当前状态转换成要显示的内容。
+         *
+         * @param text       要从 {@code displayPos} 开始显示的那一段原文
+         * @param displayPos 这一段在完整文本里的起始下标
+         */
+        private FormattedCharSequence format(String text, int displayPos) {
+            if (!masking) {
+                // 明文：原样返回，与没装格式化器时完全一致
+                return FormattedCharSequence.forward(text, Style.EMPTY);
+            }
+            return FormattedCharSequence.forward(mask(text, displayPos), Style.EMPTY);
+        }
+
+        /**
+         * 按「前 4 后 2」规则把可见片段打成星号。
+         * <p>尾部按<b>完整文本长度</b>锚定：玩家把光标拖到中间时，
+         * 可见片段可能已经不含结尾，但最后两位仍然应该可见。
+         */
+        private String mask(String visible, int displayPos) {
+            int total = getValue().length();
+            StringBuilder sb = new StringBuilder(visible.length());
+            for (int i = 0; i < visible.length(); i++) {
+                int index = displayPos + i;
+                boolean keep = index < PREFIX_KEEP || index >= total - SUFFIX_KEEP;
+                sb.append(keep ? visible.charAt(i) : '*');
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
      * 边框颜色由外部指定的输入框。
      *
      * <p>它被塞进「自定义」那一项的选中框里（第 1 步）或独占一行（第 2 步），
@@ -2734,7 +2862,7 @@ public class GuideScreen extends Screen {
      * 所以这里<b>保持 bordered 为 true</b>，只在自己画的彩色框之前先让父类画一遍，
      * 用纯黑底盖住原版的白框与浅色底，最后再把彩色框补在最上层。
      */
-    private static final class GreenBorderedEditBox extends EditBox {
+    private static class GreenBorderedEditBox extends EditBox {
 
         /**
          * 边框颜色。
