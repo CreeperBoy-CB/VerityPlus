@@ -162,7 +162,9 @@ final class EndpointValidator {
         long startedAt = System.nanoTime();
         try {
             URL target = new URL(url);
-            conn = (HttpURLConnection) target.openConnection();
+            // 走代理：没启用代理时即为普通连接。第 1 步的自定义地址也可能需要代理才通
+            conn = (HttpURLConnection) com.cb2495.verityplus.config.ProxyConfig
+                    .openConnection(target);
             // 用 GET 而不是 HEAD：不少网关（例如 SiliconFlow）对 HEAD 直接回 404，
             // 而同样的地址 GET 能正常返回 JSON。HEAD 只是省流量的手段，
             // 判断「地址能不能当 OpenAI 接口用」用 GET 才准确。

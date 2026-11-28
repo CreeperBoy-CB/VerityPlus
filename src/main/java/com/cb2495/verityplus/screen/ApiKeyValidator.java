@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 又顺手拿到模型清单：
  * <ul>
  *   <li>{@code 200} —— Key 可用，响应体就是模型列表，覆盖写入
- *       {@code .cache/verity_plus/ai_models}，留给第 3 步选模型；</li>
+ *       {@code .cache/verity_plus/ai_models.json}，留给第 3 步选模型；</li>
  *   <li>{@code 401} —— Key 无效；{@code 402} —— 欠费；</li>
  *   <li>{@code 429} / {@code 5xx} —— 服务器繁忙，可以重试；</li>
  *   <li>其余状态码 —— 说不准；</li>
@@ -54,11 +54,13 @@ final class ApiKeyValidator {
 
     /**
      * 模型清单的落盘位置，相对于游戏目录。
-     * <p>必须带 {@code .txt} 后缀：缓存目录里已有的就是这个名字，
-     * 写成 {@code ai_models} 会让第 3 步读到另一个不存在的文件。
+     * <p>内容是<b>服务端原样返回的 JSON</b>，所以后缀就是 {@code .json}——
+     * 用编辑器打开时能直接认出来、也方便玩家自己核对。
+     * <p>早期版本写成 {@code ai_models.txt}，第 3 步读到旧文件时会忽略它（见
+     * {@link com.cb2495.verityplus.config.ModelCatalog#loadCached()}）。
      */
     static final String MODELS_DIR = ".cache/verity_plus";
-    static final String MODELS_FILE = "ai_models.txt";
+    static final String MODELS_FILE = "ai_models.json";
 
     /** 校验结论。 */
     enum Level {
@@ -304,6 +306,71 @@ final class ApiKeyValidator {
     }
 
     /**
+     * 在后台线程<b>重新拉一次</b>模型清单，成功后覆盖 {@code ai_models.json}。
+     *
+     * <h3>为什么第 3 步需要它</h3>
+     * 第 2 步验 Key 时已经落过盘，但那份清单可能已经过期：玩家可能在
+     * 两步之间换了 Key、切换了提供商、或者在开放平台那边刚放出了新模型。
+     * 每次到达第 3 步都重新拉一次，表里看到的才是「此刻这个账号真能调的模型」。
+     *
+     * <h3>与验 Key 的区别</h3>
+     * <ul>
+     *   <li>不看结论等级，只看「有没有拿到可用的响应体」——欠费（402）的 Key
+     *       照样能列出模型，不该因为结论不是绿的就不刷新；</li>
+     *   <li>单独一条代号链（{@link #REFRESH_GENERATION}），不参与验 Key 的
+     *       竞态判定，两次刷新互不影响；</li>
+     *   <li>失败时<b>什么都不破坏</b>：旧缓存原样留着，回调拿到的是空列表，
+     *       由调用方决定要不要退回旧数据。</li>
+     * </ul>
+     *
+     * @param baseUrl   Base URL
+     * @param apiKey    玩家填的 Key
+     * @param provider  提供商标识
+     * @param gemini    是否 Gemini 的 {@code ?key=} 鉴权
+     * @param onFetched 在主线程回调，参数是<b>服务端原样返回的响应体</b>；
+     *                  失败时为 {@code null}
+     */
+    static void refreshModelsAsync(String baseUrl, String apiKey, String provider, boolean gemini,
+                                   java.util.function.Consumer<String> onFetched) {
+        final int generation = REFRESH_GENERATION.incrementAndGet();
+        ConfigIO.run(() -> {
+            String body = null;
+            String reason = "";
+            if (baseUrl == null || baseUrl.isBlank()) {
+                reason = "NO_BASE_URL";
+            } else if (checkFormat(apiKey) != null) {
+                reason = "KEY_FORMAT";
+            } else {
+                try {
+                    Outcome outcome = check(baseUrl, apiKey, gemini, provider);
+                    if (outcome.body() != null) {
+                        body = outcome.body();
+                        saveModels(body);
+                    } else {
+                        reason = "NO_BODY";
+                    }
+                } catch (RuntimeException e) {
+                    reason = "CRASHED";
+                    Log.warn("[ApiKeyCheck] REFRESH_FAILED | ERROR=" + e);
+                }
+            }
+            if (body == null) {
+                Log.info("[ApiKeyCheck] MODELS_REFRESH_SKIPPED | REASON=" + reason
+                        + " | LABEL=" + provider);
+            }
+            final String finalBody = body;
+            ConfigIO.backToClient(() -> {
+                // 只交回最新那一次的结果：玩家可能连点了两下，先发的慢请求不该盖掉后发的
+                if (generation != REFRESH_GENERATION.get()) return;
+                onFetched.accept(finalBody);
+            });
+        });
+    }
+
+    /** 模型清单刷新的代号，与验 Key 的 {@link #GENERATION} 各走各的。 */
+    private static final AtomicInteger REFRESH_GENERATION = new AtomicInteger();
+
+    /**
      * 在后台线程校验一个 Key。
      *
      * @param baseUrl    第 1 步定下来的 Base URL
@@ -362,7 +429,10 @@ final class ApiKeyValidator {
         HttpURLConnection conn = null;
         long startedAt = System.nanoTime();
         try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
+            // 走代理：没启用代理时这就是普通的 openConnection，行为与以前完全一致。
+            // 不用全局 System.setProperty，免得影响游戏里其它网络请求
+            conn = (HttpURLConnection) com.cb2495.verityplus.config.ProxyConfig
+                    .openConnection(new URL(url));
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(TIMEOUT_MS);
             conn.setReadTimeout(TIMEOUT_MS);
@@ -526,7 +596,7 @@ final class ApiKeyValidator {
 
     // ---------- 模型清单落盘 ----------
 
-    /** {@code .cache/verity_plus/ai_models} 的绝对路径。 */
+    /** {@code .cache/verity_plus/ai_models.json} 的绝对路径。 */
     static Path modelsFile() {
         File gameDir = Minecraft.getInstance().gameDirectory;
         return gameDir.toPath().resolve(MODELS_DIR).resolve(MODELS_FILE);

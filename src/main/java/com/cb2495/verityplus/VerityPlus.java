@@ -50,6 +50,9 @@ public class VerityPlus {
             // 引导状态：文件不存在就创建（= 首次启动），并把启动次数加一。
             // 由 FirstRunGate 在打开主界面时读取，所以必须排在那之前。
             GameState.loadOrCreate();
+            // 引导流程的代理设置。放在主线程读：它要决定后续所有检测请求走不走代理，
+            // 读不到就当作「不使用代理」，不影响流程
+            com.cb2495.verityplus.config.ProxyConfig.load();
         });
     }
 

@@ -2,10 +2,16 @@ package com.cb2495.verityplus.screen;
 
 import com.cb2495.verityplus.client.ModpackHelperBridge;
 import com.cb2495.verityplus.client.OllamaSetupScreenZh;
+import com.cb2495.verityplus.config.AiModelInfo;
 import com.cb2495.verityplus.config.GameState;
+import com.cb2495.verityplus.config.ModelCatalog;
 import com.cb2495.verityplus.config.Providers;
+import com.cb2495.verityplus.config.ProxyConfig;
 import com.cb2495.verityplus.config.VerityConfigManager;
+import com.cb2495.verityplus.guide.GuideTexts;
 import com.cb2495.verityplus.util.Log;
+import com.cb2495.verityplus.widget.ModelTablePanel;
+import com.cb2495.verityplus.widget.ProxyPanel;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -172,8 +178,11 @@ public class GuideScreen extends Screen {
      */
     private static boolean registerLinkOpened = false;
 
-    /** 第 2 步输入框右边那个功能按钮（📋 粘贴 / × 清空）的引用。 */
+    /** 第 2 步输入框右边的功能按钮（📋 粘贴 / × 清空）的引用。 */
     private Button keyActionButton;
+
+    /** 第 2 步的代理配置面板。 */
+    private ProxyPanel proxyPanel;
 
     /**
      * 本轮引导是否已经从 Verity 配置里补过各步骤的选择。
@@ -191,6 +200,67 @@ public class GuideScreen extends Screen {
 
     /** 主按钮（开始 / 确认 / 继续 / 完成）的引用：第 2 步要按 Key 的结论置灰。 */
     private GuideButton mainButton;
+
+    // ================= 第 3 步：选模型 =================
+
+    /**
+     * 第 3 步的模型表。
+     * <p>做成静态：翻到第 4 步再翻回来，玩家刚选好的模型与排序方式不该被清掉。
+     * 只在 {@link #resetStepAnswers()} 里重建。
+     */
+    private static ModelTablePanel modelPanel = null;
+
+    /**
+     * 第 3 步的模型清单。{@code null} 表示还没加载过。
+     * <p>清单来自第 2 步验 Key 时落盘的 {@code .cache/verity_plus/ai_models.json}，
+     * 每次到达这一步还会再拉一次（见 {@link #refreshModelEntries()}）。
+     */
+    private static List<ModelCatalog.Entry> modelEntries = null;
+
+    /**
+     * 自定义输入框是不是<b>已经填完</b>（停下打字满 1 秒）。
+     * <p>需求：选中模型进度 +2，选自定义 +1；自定义里连续打字时保持 +1，
+     * 停手满 1 秒升到 +2。自动进来的这一步则保持 +1，等玩家真的改了才 +2。
+     */
+    private static boolean customSettled = false;
+
+    /** 自定义输入框最后一次内容变化的时间戳。 */
+    private static long customLastTypedAt = 0L;
+
+    /** 玩家是否已经在这一步动过手（选过表里某一行、或改过自定义输入框）。 */
+    private static boolean modelStepTouched = false;
+
+    /** 自定义输入框内容在上一帧的样子，用来识别「玩家又敲了一个字」。 */
+    private static String customPrevText = null;
+
+    /** 「打 1 秒后升级」的判定窗口。 */
+    private static final long CUSTOM_SETTLE_MS = 1000L;
+
+    /**
+     * 模型清单的刷新状态。
+     * <p>到达第 3 步时会重新拉一次清单，拉到之前先用磁盘上那份顶上。
+     * 只有「正在拉」与「拉失败但还剩旧数据」需要让玩家知道——
+     * 否则他会以为自己看到的就是最新的。
+     */
+    private enum ModelRefreshState {
+        /** 还没发起过。 */
+        IDLE,
+        /** 正在请求。 */
+        LOADING,
+        /** 拿到了新清单。 */
+        READY,
+        /** 请求失败，仍在用磁盘上的旧清单。 */
+        FAILED,
+        /** 没条件刷新（缺 Key 或 Base URL），直接用磁盘上的。 */
+        SKIPPED
+    }
+
+    /** 当前的刷新状态；静态，翻页回来时保持。 */
+    private static ModelRefreshState modelRefreshState = ModelRefreshState.IDLE;
+
+    /** 第 3 步的顶部正文。 */
+    private static final String MODEL_QUESTION = GuideTexts.MODEL_QUESTION;
+
 
     /** 等到点要发起的 Key 校验的时间戳；{@code <= 0} 表示当前没有排队的校验。 */
     private long pendingKeyCheckAt = 0L;
@@ -375,6 +445,14 @@ public class GuideScreen extends Screen {
         apiKeyCheck = null;
         checkedApiKey = null;
         registerLinkOpened = false;
+        // 第 3 步：旧的模型表与选中项都作废，重新加载清单
+        modelPanel = null;
+        modelEntries = null;
+        modelRefreshState = ModelRefreshState.IDLE;
+        customSettled = false;
+        customLastTypedAt = 0L;
+        customPrevText = null;
+        modelStepTouched = false;
         // 新一轮：允许再从配置里补一次
         stepAnswersRestored = false;
     }
@@ -520,6 +598,11 @@ public class GuideScreen extends Screen {
             initApiKeyStep(buttonY);
         }
 
+        // 第 3 步自己的控件：搜索框、搜索按钮、表格里的自定义输入框
+        if (position == Position.STEP && step == STEP_MODEL) {
+            initModelStep();
+        }
+
         // 进度条要等点了「开始」才出现；欢迎页上它一直处于未展开状态。
         // 出现动画只在真正第一次显示时播一次（appearStartMs 由 appearProgress 首帧设置），
         // 之后翻页走的是绿条推进动画，不会再「重新长一遍」。
@@ -592,6 +675,14 @@ public class GuideScreen extends Screen {
                     if (!commitProviderChoice()) return;
                 }
                 if (step == STEP_API_KEY && !commitApiKey()) return;
+                if (step == STEP_MODEL) {
+                    String reason = modelBlockReason();
+                    if (reason != null) {
+                        Log.debug("[Guide] CONFIRM_BLOCKED | BY=MODEL_STEP | REASON=" + reason);
+                        return;
+                    }
+                    if (!commitModel()) return;
+                }
                 if (step >= GameState.STEPS) {
                     mc.setScreen(GuideScreen.finish(onFinished));
                 } else {
@@ -614,11 +705,14 @@ public class GuideScreen extends Screen {
     /** 第 2 步的步号：填 API Key。 */
     private static final int STEP_API_KEY = 2;
 
+    /** 第 3 步的步号：选模型。 */
+    private static final int STEP_MODEL = 3;
+
     /** 第 1 步 Endpoint 输入框的提示文字（原版提示与聚焦时补画的那份共用）。 */
     private static final String ENDPOINT_HINT = "请填入 AI 提供商文档中的AI Endpoint";
 
     /** 第 1 步的标题。 */
-    private static final String PROVIDER_QUESTION = "首先，请选择 Verity AI 大脑的提供商";
+    private static final String PROVIDER_QUESTION = GuideTexts.PROVIDER_QUESTION;
 
     /**
      * 列表左右两侧与屏幕边缘的留白。
@@ -681,6 +775,9 @@ public class GuideScreen extends Screen {
 
     /** 列表滚动偏移（像素）。 */
     private int pickerScroll = 0;
+
+    /** 是否正在拖动第 1 步列表的滚动条。 */
+    private boolean pickerDraggingScroll = false;
 
     /** 「点击此处」链接在屏幕上的区域，render 时更新，点击时读取。 */
     private int ollamaLinkLeft = 0;
@@ -984,6 +1081,57 @@ public class GuideScreen extends Screen {
         return Math.max(0, content - pickerVisibleHeight());
     }
 
+    // ---------- 第 1 步滚动条的几何 ----------
+    // 绘制、命中判定、拖动三处共用这三个方法。原先绘制那段是就地算的，
+    // 命中判定再算一遍的话，两边迟早会对不上（滑块看着在 A 处、点到的却是 B 处）。
+
+    /** 滚动条轨道的左边缘。 */
+    private int pickerScrollTrackX() {
+        return pickerRight() - PICKER_SCROLL_WIDTH - 1;
+    }
+
+    /** 滑块高度。 */
+    private int pickerScrollThumbHeight(int trackHeight) {
+        int content = pickerItems().size() * PICKER_ITEM_HEIGHT;
+        return Math.max(16, trackHeight * pickerVisibleHeight() / Math.max(1, content));
+    }
+
+    /** 滑块顶端相对轨道顶部的偏移。 */
+    private int pickerScrollThumbOffset(int trackHeight, int thumbHeight, int scroll) {
+        int maxScroll = pickerMaxScroll();
+        if (maxScroll <= 0) return 0;
+        return (int) ((long) (trackHeight - thumbHeight) * scroll / maxScroll);
+    }
+
+    /** 鼠标是否落在滚动条轨道上（含滑块与空白处）。 */
+    private boolean isPickerScrollTrackHit(double mouseX, double mouseY) {
+        if (pickerMaxScroll() <= 0) return false;
+        int trackX = pickerScrollTrackX();
+        return mouseX >= trackX && mouseX < trackX + PICKER_SCROLL_WIDTH
+                && mouseY >= pickerRowsTop() && mouseY < pickerListBottom() - 1;
+    }
+
+    /**
+     * 按鼠标位置换算出滚动偏移。
+     * <p>不要求指针正好压在滑块上，只要还在轨道里就跟手走——
+     * 这与原版滚动条的手感一致：按下之后滑块黏在指针上。
+     */
+    private void pickerScrollFromMouseY(double mouseY) {
+        int trackTop = pickerRowsTop();
+        int trackHeight = pickerListBottom() - 1 - trackTop;
+        int thumbHeight = pickerScrollThumbHeight(trackHeight);
+        int travel = trackHeight - thumbHeight;
+        if (travel <= 0) return;
+        double relative = mouseY - trackTop - thumbHeight / 2.0;
+        double ratio = Math.max(0.0, Math.min(1.0, relative / travel));
+        int before = pickerScroll;
+        pickerScroll = (int) Math.round(ratio * pickerMaxScroll());
+        // 输入框钉在「自定义」那一块上，块随滚动移动，输入框也得跟着走
+        if (endpointBox != null && pickerScroll != before) {
+            endpointBox.setY(customBoxY());
+        }
+    }
+
     /** 选中了一项：只记下来，右侧列随之刷新。 */
     private void onProviderPicked(String label) {
         pickedProvider = label;
@@ -1095,6 +1243,18 @@ public class GuideScreen extends Screen {
         }
     }
 
+    /**
+     * 第 1 步里需要补画在控件之上的部分。
+     * <p>自定义 Endpoint 输入框聚焦且为空时的提示文字，原本由输入框自己画，
+     * 但那样会在控件绘制中途调用 {@code drawString}、触发批次提前提交，
+     * 把其余文字挤到错的图层里（与第 2 步同一个坑）。改到这里补。
+     */
+    private void renderProviderOverlay(GuiGraphics graphics) {
+        if (endpointBox instanceof GreenBorderedEditBox box) {
+            box.drawFocusedHint(graphics);
+        }
+    }
+
     /** 校验结论那一行（图标 + 文字 + 可选的重试链接）。 */
     private void renderEndpointCheck(GuiGraphics graphics, int mouseX, int mouseY) {
         if (endpointCheck == null) {
@@ -1130,9 +1290,9 @@ public class GuideScreen extends Screen {
     // ================= 第 2 步：填 API Key =================
 
     /** 第 2 步的标题正文：不折行的前提下放在标题行下方，与第 1 步的问题行同一高度。 */
-    private static final String API_KEY_QUESTION = "请在此处填入你的API Key";
+    private static final String API_KEY_QUESTION = GuideTexts.API_KEY_QUESTION;
 
-    /** 输入框的占位提示。 */
+    /** 第 2 步「填入 API Key」的输入框占位提示。 */
     private static final String API_KEY_HINT = "请输入API Key……";
 
     /** 输入框宽度占屏幕宽度的比例：两侧留白由它反算。 */
@@ -1194,8 +1354,44 @@ public class GuideScreen extends Screen {
         this.keyActionButton = action;
         this.addRenderableWidget(action);
 
+        // 代理面板：紧跟输入框，收起时只占一行
+        this.proxyPanel = new ProxyPanel(Minecraft.getInstance(), this::onProxyApplied);
+        proxyPanel.layout(proxyPanelLeft(), proxyPanelY(), proxyPanelWidth());
+        proxyPanel.initWidgets(this::addRenderableWidget);
+
         // 进页面直接聚焦，玩家不用先点一下才能打字
         this.setFocused(box);
+    }
+
+    /** 代理面板的左边缘：与输入框对齐。 */
+    private int proxyPanelLeft() {
+        return apiKeyBoxLeft();
+    }
+
+    /** 代理面板的宽度：与「输入框 + 功能按钮」整块同宽，视觉上是一体的。 */
+    private int proxyPanelWidth() {
+        return apiKeyBoxWidth() + KEY_ACTION_GAP + KEY_ACTION_SIZE;
+    }
+
+    /** 代理面板的 Y：输入框正下方。 */
+    private int proxyPanelY() {
+        return apiKeyBoxY() + API_KEY_BOX_HEIGHT + apiKeyLineGap();
+    }
+
+    /** 代理面板底边：结论行从它下面开始。 */
+    private int proxyPanelBottom() {
+        return proxyPanel == null ? proxyPanelY() : proxyPanel.bottom();
+    }
+
+    /**
+     * 代理设置被「应用」了：立刻重跑一次 Key 校验。
+     * <p>玩家刚改完代理，最想确认的就是「现在通不通」，不该再等 2 秒防抖。
+     */
+    private void onProxyApplied(ProxyConfig.Settings settings) {
+        Log.info("[Guide] PROXY_APPLIED | " + (settings.enabled() ? settings.describe() : "DISABLED"));
+        if (apiKeyText.trim().isEmpty()) return;
+        // 换一次代号，作废在途的旧请求
+        scheduleApiKeyCheck(true);
     }
 
     /**
@@ -1219,19 +1415,30 @@ public class GuideScreen extends Screen {
         return Math.max(0, (this.width - blockWidth) / 2);
     }
 
-    /** 第 2 步输入框的 Y：与第 1 步的问题行同一高度，翻页时标题不跳。 */
+    /**
+     * 第 2 步输入框的 Y：与第 1、3 步的输入框同一高度，翻页时标题不跳。
+     */
     private int apiKeyBoxY() {
         return providerQuestionY() + this.font.lineHeight + 12;
     }
 
-    /** 留空内那行结论的 Y：紧贴输入框下方。 */
-    private int apiKeyStatusY() {
-        return apiKeyBoxY() + API_KEY_BOX_HEIGHT + 8;
+    /**
+     * 结论行与「还没有API Key？」之间的间距：1/4 行高。
+     * <p>行高 9px 时是 2px，行高 10px 时是 2px，行高 12px 时是 3px——
+     * 用整数除法而不是四舍五入，宁可略紧也不要吃掉下一行的空间。
+     */
+    private int apiKeyLineGap() {
+        return this.font.lineHeight / 4;
     }
 
-    /** 「还没有API Key？」那行的 Y。 */
+    /** 结论行的 Y：紧贴代理面板下方。 */
+    private int apiKeyStatusY() {
+        return proxyPanelBottom() + apiKeyLineGap();
+    }
+
+    /** 「还没有API Key？」那行的 Y：紧贴结论行下方。 */
     private int apiKeyRegisterY() {
-        return apiKeyStatusY() + this.font.lineHeight + 8;
+        return apiKeyStatusY() + this.font.lineHeight + apiKeyLineGap();
     }
 
     /** 功能按钮该显示哪个字：输入框为空时「粘贴」，否则「清空」。 */
@@ -1550,12 +1757,38 @@ public class GuideScreen extends Screen {
 
     // ---------- 第 2 步的绘制 ----------
 
-    /** 画第 2 步：标题、结论行、「还没有API Key？」、以及「继续」被拦时的第二处红字。 */
+    /**
+     * 画第 2 步的标题。
+     *
+     * <p>结论行与「还没有API Key？」曾经也在这里画，但它们位于输入框下方，
+     * 会被控件盖住，试过几轮都没能稳定解决。现在这两行改由
+     * {@link #renderApiKeyOverlay} 在控件<b>之后</b>补画：
+     * 无论「被盖住」的真正机制是哪一种，晚画都一定画在上面。
+     */
     private void renderApiKeyStep(GuiGraphics graphics, int mouseX, int mouseY) {
         int centerX = this.width / 2;
-
         graphics.drawCenteredString(this.font, Component.literal(API_KEY_QUESTION),
                 centerX, providerQuestionY(), COLOR_BODY);
+    }
+
+    /**
+     * 第 2 步里位于输入框下方的两行，以及输入框自己的聚焦提示。
+     * <p>由 {@code render} 在 {@code super.render} 之后调用——见 {@link #renderApiKeyStep}。
+     */
+    private void renderApiKeyOverlay(GuiGraphics graphics) {
+        int centerX = this.width / 2;
+
+        // 输入框聚焦且为空时的提示文字。它必须画在控件之后，
+        // 否则会被输入框自己的黑色底盖掉
+        if (apiKeyBox instanceof GreenBorderedEditBox box) {
+            box.drawFocusedHint(graphics);
+        }
+
+        // 代理面板：位置随展开状态变化，每帧重新摆一次
+        if (proxyPanel != null) {
+            proxyPanel.layout(proxyPanelLeft(), proxyPanelY(), proxyPanelWidth());
+            proxyPanel.render(graphics, 0, 0);
+        }
 
         renderApiKeyStatus(graphics);
 
@@ -1608,8 +1841,282 @@ public class GuideScreen extends Screen {
         keyRegisterLink[3] = y + this.font.lineHeight;
     }
 
-    // ---------- 校验结论行的通用画法 ----------
+    // ================= 第 3 步：选模型 =================
 
+    /**
+     * 第 3 步的控件布局。
+     * <p>搜索框与搜索按钮是真的控件；表格、注解、悬停提示都是自绘的，
+     * 由 {@link ModelTablePanel} 负责，这里只把可用区域算给它。
+     */
+    private void initModelStep() {
+        // 先用磁盘上已有的清单把表铺出来（可能为空），免得白等一次网络
+        loadModelEntriesFromDisk();
+
+        ModelTablePanel panel = modelPanel();
+        panel.initWidgets(this::addRenderableWidget,
+                modelTableLeft(), modelTableRight(), modelSearchY());
+        // initWidgets 里有 setValue 会回调 responder，但此时表格还没有数据；
+        // 再刷一次视图，保证搜索框恢复出来的关键字立刻生效
+        panel.layout(modelTableLeft(), modelTableRight(), modelTableTop(), modelTableBottom());
+
+        this.setFocused(null);
+
+        // 每次到达这一步都重新拉一次：表里显示的必须是「此刻这个账号真能调的模型」
+        refreshModelEntries();
+    }
+
+    /**
+     * 从磁盘读一次清单。
+     * <p>第 2 步验 Key 成功时已经把 {@code /models} 的原始响应写进
+     * {@code .cache/verity_plus/ai_models.json}。这里只负责「先有个东西可看」，
+     * 真正的刷新由 {@link #refreshModelEntries()} 在后台另做。
+     * <p>读不到时仍给一张空表：界面不能因为少一个缓存文件就白屏。
+     */
+    private static void loadModelEntriesFromDisk() {
+        modelEntries = ModelCatalog.loadCached();
+        Log.info("[Guide] MODELS_LOADED | COUNT=" + modelEntries.size()
+                + " | FILE=" + ModelCatalog.modelsCacheFile());
+    }
+
+    /**
+     * 后台重新拉一次模型清单，拿到后换掉表里的数据。
+     *
+     * <p>为什么每次到达都要拉：玩家可能在第 2 步之后又换了 Key、切了提供商，
+     * 或者在开放平台那边刚放出新模型。只读缓存的话，这张表永远是「上一次验 Key
+     * 那一刻的样子」。请求本身与第 2 步验 Key 用的是同一个地址，
+     * 成功时同样覆盖 {@code ai_models.json}。
+     *
+     * <p>失败时保留磁盘上那份旧清单，不清空表格：网络抖一下不该让玩家重新选一遍模型。
+     */
+    private void refreshModelEntries() {
+        String key = apiKeyText.trim();
+        String baseUrl = apiKeyBaseUrl();
+        if (key.isEmpty() || baseUrl.isEmpty()) {
+            Log.info("[Guide] MODELS_REFRESH_SKIPPED | REASON=NOT_CONFIGURED"
+                    + " | HAS_KEY=" + !key.isEmpty() + " | BASE_URL=" + baseUrl);
+            modelRefreshState = ModelRefreshState.SKIPPED;
+            return;
+        }
+        modelRefreshState = ModelRefreshState.LOADING;
+        ApiKeyValidator.refreshModelsAsync(baseUrl, key, apiKeyProviderId(),
+                ApiKeyValidator.isGemini(pickedProvider),
+                body -> onModelsRefreshed(body));
+    }
+
+    /** 刷新请求回来了（在主线程）。 */
+    private void onModelsRefreshed(String body) {
+        List<ModelCatalog.Entry> fresh = body == null ? List.of() : ModelCatalog.parse(body);
+        if (fresh.isEmpty()) {
+            // 表单把空列表当成「解析失败」：保留旧数据，只在界面上提示一下
+            Log.info("[Guide] MODELS_REFRESH_EMPTY | KEEPING_CACHED_COUNT="
+                    + (modelEntries == null ? 0 : modelEntries.size()));
+            modelRefreshState = ModelRefreshState.FAILED;
+            return;
+        }
+        modelEntries = fresh;
+        modelRefreshState = ModelRefreshState.READY;
+        if (modelPanel != null) {
+            modelPanel.setModels(apiKeyProviderId(), AiModelInfo.isAggregator(baseUrlOfModelRefresh()),
+                    fresh);
+        }
+        Log.info("[Guide] MODELS_REFRESHED | COUNT=" + fresh.size());
+    }
+
+    /** 刷新模型清单时用的 Base URL（与第 2 步一致）。 */
+    private static String baseUrlOfModelRefresh() {
+        return ApiKeyValidator.baseUrlFor(pickedProvider, customEndpoint);
+    }
+
+    /** 拿到（必要时创建）第 3 步的表格面板，并按当前提供商灌一次数据。 */
+    private ModelTablePanel modelPanel() {
+        if (modelPanel == null) {
+            modelPanel = new ModelTablePanel(Minecraft.getInstance());
+            boolean aggregator = AiModelInfo.isAggregator(apiKeyBaseUrl());
+            modelPanel.setModels(apiKeyProviderId(), aggregator,
+                    modelEntries == null ? List.of() : modelEntries);
+        }
+        return modelPanel;
+    }
+
+    /** 第 2 步验 Key 时用的那个 Base URL；第 3 步靠它判断连的是不是中转站。 */
+    private static String apiKeyBaseUrl() {
+        return ApiKeyValidator.baseUrlFor(pickedProvider, customEndpoint);
+    }
+
+    /** 搜索框那一行的 Y：与第 1、2 步的输入框同一高度，翻页时标题不跳。 */
+    private int modelSearchY() {
+        return providerQuestionY() + this.font.lineHeight + 12;
+    }
+
+    /** 表格左边缘，与第 1 步的列表对齐。 */
+    private int modelTableLeft() {
+        return PICKER_SIDE_MARGIN;
+    }
+
+    /** 表格右边缘。 */
+    private int modelTableRight() {
+        return this.width - PICKER_SIDE_MARGIN;
+    }
+
+    /** 表格顶端：搜索框那一行下面。 */
+    private int modelTableTop() {
+        return modelSearchY() + ModelTablePanel.searchRowHeight();
+    }
+
+    /**
+     * 表格底端：一直铺到「继续」按钮上方，只给按钮本身留一点缝。
+     *
+     * <p>两行注解<b>不再</b>预留空间：它们挪到了表格内部的左下角
+     * （见 {@code ModelTablePanel}），本来就在表格里，不需要额外的外部高度。
+     * 之前把它们算在外面，等于白白让掉 {@code 2×行高 + 8} 的空间——
+     * 在 1080P ×4 缩放下 GUI 只有 480×270，那点空间正好是一整行模型，
+     * 表现就是「只能显示三行多」。
+     */
+    private int modelTableBottom() {
+        return this.height - BUTTON_BOTTOM_MARGIN - NOTE_BUTTON_GAP;
+    }
+
+    /** 表格底边与「继续」按钮之间的间隙。 */
+    private static final int NOTE_BUTTON_GAP = 8;
+
+    /**
+     * 第 3 步的绘制。
+     * <p>正文、搜索框那一行的提示、表格、两行注解都由面板画；
+     * 这里只补标题与「读不到清单」时的说明。
+     */
+    private void renderModelStep(GuiGraphics graphics, int mouseX, int mouseY) {
+        int centerX = this.width / 2;
+        graphics.drawCenteredString(this.font, Component.literal(MODEL_QUESTION),
+                centerX, providerQuestionY(), COLOR_BODY);
+
+        ModelTablePanel panel = modelPanel();
+        panel.layout(modelTableLeft(), modelTableRight(), modelTableTop(), modelTableBottom());
+        panel.render(graphics, mouseX, mouseY);
+
+        if (panel.isEmpty()) {
+            drawModelEmptyNotice(graphics, centerX);
+        }
+        drawModelRefreshStatus(graphics, centerX);
+    }
+
+    /**
+     * 表格非空时，在表格正中偏下一行提示「正在刷新」或「刷新失败」。
+     * <p>贴在表格底部而不是正中：盖住内容会让正在看的人读不下去，
+     * 而这里只要「能看到有这么一句」就够了。
+     */
+    private void drawModelRefreshStatus(GuiGraphics graphics, int centerX) {
+        String text;
+        int color;
+        switch (modelRefreshState) {
+            case LOADING -> {
+                text = "正在刷新模型列表……";
+                color = COLOR_CHECK_PENDING;
+            }
+            case FAILED -> {
+                text = "模型列表刷新失败，当前显示的是上次的缓存";
+                color = COLOR_CHECK_WARN;
+            }
+            default -> {
+                return;
+            }
+        }
+        graphics.drawCenteredString(this.font, Component.literal(text),
+                centerX, modelTableBottom() - this.font.lineHeight - 2, color);
+    }
+
+    /** 清单为空时，在表格正中说明原因与出路。 */
+    private void drawModelEmptyNotice(GuiGraphics graphics, int centerX) {
+        int y = (modelTableTop() + modelTableBottom()) / 2 - this.font.lineHeight;
+        graphics.drawCenteredString(this.font,
+                Component.literal("没有取得模型清单"),
+                centerX, y, COLOR_CHECK_WARN);
+        graphics.drawCenteredString(this.font,
+                Component.literal("请返回上一步确认 API Key 已通过验证，或直接在「自定义」里填模型标识"),
+                centerX, y + this.font.lineHeight + 4, COLOR_NEUTRAL);
+    }
+
+    /**
+     * 第 3 步现在为什么不能继续；能继续时返回 {@code null}。
+     * <p>与其它两步同一套用法：按钮灰态与 tooltip 共用同一份原因。
+     * <p>条件是「选了一个模型，或在自定义里填了模型标识」——两处都空就拦住。
+     */
+    private String modelBlockReason() {
+        ModelTablePanel panel = modelPanel();
+        String model = panel.effectiveModel();
+        if (model == null || model.isBlank()) {
+            if (panel.isCustomReady()) return "正在读取自定义模型名，请稍候……";
+            return "请先选择一个模型，或在「自定义」里填入模型标识";
+        }
+        return null;
+    }
+
+    /**
+     * 点「继续」时把模型写进 Verity 的配置。
+     *
+     * @return {@code false} 表示被拦下，不该翻页
+     */
+    private boolean commitModel() {
+        String model = modelPanel().effectiveModel();
+        if (model == null || model.isBlank()) {
+            Log.info("[Guide] MODEL_MISSING | STEP=" + step);
+            return false;
+        }
+        VerityConfigManager.ConfigData data = VerityConfigManager.loadVerityConfig();
+        if (model.equals(data.model)) return true;
+        data.model = model;
+        VerityConfigManager.saveAll(data, data.provider);
+        Log.info("[Guide] MODEL_COMMITTED | aiModel=" + model
+                + " | aiProvider=" + data.provider);
+        return true;
+    }
+
+    /**
+     * 第 3 步的每帧推进：识别自定义输入框是否还在打字，以及要不要把进度从 +1 升到 +2。
+     * <p>需求原文：「选中模型后 +2；选自定义 +1；1 秒内没有再打字就 +2，打字时保持 +1」。
+     */
+    private void tickModelStep() {
+        ModelTablePanel panel = modelPanel();
+        String text = panel.effectiveModel();
+
+        // 内容变了就是玩家又敲了一下：重新计时，并把进度压回 +1
+        if (!java.util.Objects.equals(customPrevText, text)) {
+            customPrevText = text;
+            customLastTypedAt = System.currentTimeMillis();
+            modelStepTouched = true;
+            if (panel.isCustomReady()) customSettled = false;
+            else customSettled = false;
+        } else if (!customSettled && panel.isCustomReady()
+                && System.currentTimeMillis() - customLastTypedAt >= CUSTOM_SETTLE_MS) {
+            // 停手满 1 秒：算「填完了」，进度升到 +2
+            customSettled = true;
+        } else if (!panel.isCustomReady()) {
+            customSettled = false;
+        }
+
+        if (mainButton != null) {
+            mainButton.setBlockedReason(modelBlockReason());
+        }
+    }
+
+    /** 第 3 步当前该显示的份数（0..{@link #SUB_STEPS}）。 */
+    private int modelStepSubSteps() {
+        ModelTablePanel panel = modelPanel();
+        // 没动过手（直接翻进来的）：沿用自动进来的 +1，等玩家真的选了才 +2
+        if (!modelStepTouched) {
+            return panel.effectiveModel() == null ? 0 : 1;
+        }
+        // 选了表里某一行：直接 +2
+        if (panel.selectedModel() != null) {
+            return 2;
+        }
+        // 自定义：打字期间保持 +1，停手满 1 秒升到 +2
+        if (panel.isCustomReady()) {
+            return customSettled ? 2 : 1;
+        }
+        return 0;
+    }
+
+    // ---------- 校验结论行的通用画法 ----------
     /**
      * 画一行「图标 + 正文 + 可选链接」，并记下链接的可点区域。
      *
@@ -1714,7 +2221,6 @@ public class GuideScreen extends Screen {
         graphics.fill(left + 1, rowsTop - 1, right - 1, rowsTop, COLOR_LIST_BORDER);
 
         List<Providers.PickerOption> items = pickerItems();
-        int visible = pickerVisibleHeight();
         int scroll = Math.max(0, Math.min(pickerMaxScroll(), pickerScroll));
         pickerScroll = scroll;
 
@@ -1779,14 +2285,12 @@ public class GuideScreen extends Screen {
         // 右侧滚动条：内容装得下时不画
         int maxScroll = pickerMaxScroll();
         if (maxScroll > 0) {
-            int trackX = right - PICKER_SCROLL_WIDTH - 1;
             int trackTop = rowsTop;
-            int trackBottom = bottom - 1;
-            int trackHeight = trackBottom - trackTop;
-            int contentHeight = items.size() * PICKER_ITEM_HEIGHT;
-            int thumbHeight = Math.max(16, trackHeight * visible / contentHeight);
-            int thumbY = trackTop + (int) ((long) (trackHeight - thumbHeight) * scroll / maxScroll);
-            graphics.fill(trackX, trackTop, trackX + PICKER_SCROLL_WIDTH, trackBottom, 0xFF3A3A3A);
+            int trackHeight = bottom - 1 - trackTop;
+            int thumbHeight = pickerScrollThumbHeight(trackHeight);
+            int thumbY = trackTop + pickerScrollThumbOffset(trackHeight, thumbHeight, scroll);
+            int trackX = pickerScrollTrackX();
+            graphics.fill(trackX, trackTop, trackX + PICKER_SCROLL_WIDTH, bottom - 1, 0xFF3A3A3A);
             graphics.fill(trackX, thumbY, trackX + PICKER_SCROLL_WIDTH, thumbY + thumbHeight, 0xFFCCCCCC);
         }
     }
@@ -1923,7 +2427,42 @@ public class GuideScreen extends Screen {
     }
 
     /**
-     * 第 1 步的列表滚轮。
+     * 自绘列表/表格的滚动条拖动。
+     * <p>第 1 步的提供商列表与第 3 步的模型表都是自绘的、不是控件，
+     * 所以「按下滚动条 → 划动 → 松开」这一整条链都必须由界面自己转交；
+     * 否则事件落到 {@code super} 就断了，滑块会停在原地不动。
+     */
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (position == Position.STEP && step == STEP_PROVIDER) {
+            if (pickerDraggingScroll && button == 0) {
+                pickerScrollFromMouseY(mouseY);
+                return true;
+            }
+        }
+        if (position == Position.STEP && step == STEP_MODEL) {
+            if (modelPanel().mouseDragged(mouseX, mouseY, button, dragX, dragY)) {
+                return true;
+            }
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    /** 松开鼠标：结束滚动条的拖动。 */
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (button == 0 && pickerDraggingScroll) {
+            pickerDraggingScroll = false;
+        }
+        if (position == Position.STEP && step == STEP_MODEL) {
+            // 拖动结束后仍然交给 super：控件（搜索框等）可能也记着自己的拖动状态
+            modelPanel().mouseReleased(mouseX, mouseY, button);
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    /**
+     * 第 1 步的列表滚轮、第 3 步的模型表滚轮。
      * <p>先于 {@code super} 处理：表格是自绘的，交给控件链的话会被当成「没人要」的事件。
      */
     @Override
@@ -1940,6 +2479,14 @@ public class GuideScreen extends Screen {
                 if (endpointBox != null && pickerScroll != before) {
                     endpointBox.setY(customBoxY());
                 }
+                return true;
+            }
+        }
+        // 第 3 步的表格同样是自绘的，滚轮必须在这里转交给它，
+        // 否则表格里的控件（搜索框、自定义输入框、搜索按钮）都不吃滚轮，
+        // 事件一路落到 super 就被丢掉了——表现为「滚动条完全没反应」
+        if (position == Position.STEP && step == STEP_MODEL) {
+            if (modelPanel().mouseScrolled(mouseX, mouseY, delta)) {
                 return true;
             }
         }
@@ -2233,6 +2780,7 @@ public class GuideScreen extends Screen {
             case STEP -> (step - 1) * SUB_STEPS
                     + (step == STEP_PROVIDER ? providerStepSubSteps()
                     : step == STEP_API_KEY ? apiKeyStepSubSteps()
+                    : step == STEP_MODEL ? modelStepSubSteps()
                     : subStepProgress);
             case FINISH -> GameState.STEPS * SUB_STEPS;
         };
@@ -2548,12 +3096,23 @@ public class GuideScreen extends Screen {
             // 边框颜色：绿/红/橙/黄取决于 Key 的校验结论
             GreenBorderedEditBox.setBorderColor(apiKeyBorderColor());
             renderApiKeyStep(graphics, mouseX, mouseY);
+        } else if (position == Position.STEP && step == STEP_MODEL) {
+            renderModelStep(graphics, mouseX, mouseY);
         } else {
             graphics.drawCenteredString(this.font, Component.literal(bodyText()),
                     centerX, this.height / 2 - 20, COLOR_HEADING);
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);
+
+        // 第 2 步输入框下方的两行必须在控件之后补画，否则会被输入框盖住
+        if (position == Position.STEP && step == STEP_API_KEY) {
+            renderApiKeyOverlay(graphics);
+        }
+        // 第 1 步的聚焦提示同理
+        if (position == Position.STEP && step == STEP_PROVIDER) {
+            renderProviderOverlay(graphics);
+        }
     }
 
     /**
@@ -2578,6 +3137,9 @@ public class GuideScreen extends Screen {
         if (apiKeyBox != null) {
             apiKeyBox.tick();
         }
+        if (position == Position.STEP && step == STEP_MODEL) {
+            modelPanel().tickWidgets();
+        }
         // 停止输入满 2 秒就发起探活
         if (position == Position.STEP && step == STEP_PROVIDER) {
             tickEndpointCheck();
@@ -2597,6 +3159,8 @@ public class GuideScreen extends Screen {
         }
         if (position == Position.STEP && step == STEP_API_KEY) {
             tickApiKeyCheck();
+            // 代理面板展开时输入框的光标要闪
+            if (proxyPanel != null) proxyPanel.tick();
             // 校验结论会在异步回调里变，按钮跟着它走
             if (mainButton != null) {
                 mainButton.setBlockedReason(apiKeyBlockReason());
@@ -2605,6 +3169,9 @@ public class GuideScreen extends Screen {
             // 真实可用的凭证，不该整段露在外面。等待防抖（还没发请求）也算在内——
             // 那正是玩家刚填完、最可能截图或被人看到的一刻。
             ApiKeyEditBox.setMasking(apiKeyShouldMask());
+        }
+        if (position == Position.STEP && step == STEP_MODEL) {
+            tickModelStep();
         }
     }
 
@@ -2653,6 +3220,13 @@ public class GuideScreen extends Screen {
                     retryEndpointCheck();
                     return true;
                 }
+                // 滚动条：它在最右侧一条窄带里，要排在「点某一行」之前，
+                // 否则按下滑块会被当成选中了旁边那一项
+                if (isPickerScrollTrackHit(mouseX, mouseY)) {
+                    pickerDraggingScroll = true;
+                    pickerScrollFromMouseY(mouseY);
+                    return true;
+                }
                 String picked = pickerRowAt(mouseX, mouseY);
                 if (picked != null) {
                     // 「自定义」被选中后，这一行的右列已经被输入框占据。
@@ -2668,6 +3242,12 @@ public class GuideScreen extends Screen {
 
             // 第 2 步的结论链接与注册链接也是自绘的
             if (position == Position.STEP && step == STEP_API_KEY) {
+                // 代理面板的标题行是自绘的（整行可点开/收起）；
+                // 展开区里的控件由 Minecraft 自己派发，所以先让它试
+                if (proxyPanel != null && proxyPanel.isTitleHit(mouseX, mouseY)) {
+                    proxyPanel.mouseClicked(mouseX, mouseY, button);
+                    return true;
+                }
                 if (linkHit(keyStatusLink, mouseX, mouseY)) {
                     onApiKeyStatusLink();
                     return true;
@@ -2679,6 +3259,17 @@ public class GuideScreen extends Screen {
                         // 去过开放平台了：进度 +1（之后 Key 一旦变绿就升到 +2）
                         registerLinkOpened = true;
                     }
+                    return true;
+                }
+            }
+
+            // 第 3 步的表格、表头排序、自定义输入框都是自绘的
+            if (position == Position.STEP && step == STEP_MODEL) {
+                ModelTablePanel panel = modelPanel();
+                if (panel.mouseClicked(mouseX, mouseY, button)) {
+                    // 表格把点击吃掉了：把焦点从搜索框上收回来，
+                    // 否则玩家点完行再按 Esc 会被当成「清空搜索」
+                    if (!panel.isCustomFocused()) this.setFocused(null);
                     return true;
                 }
             }
@@ -2712,6 +3303,8 @@ public class GuideScreen extends Screen {
     /**
      * 第 1 步的输入框里按回车 = 点「确认」。
      * <p>原版输入框不吃回车，不给这条路径的话玩家填完地址还得去够鼠标。
+     * <p>第 3 步同理：搜索框与自定义输入框里按回车 = 点「继续」
+     * （搜索是边打边筛的，不需要再按一次回车才生效）。
      */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
@@ -2726,6 +3319,14 @@ public class GuideScreen extends Screen {
                 && (keyCode == 257 || keyCode == 335)) {
             next();
             return true;
+        }
+        if (position == Position.STEP && step == STEP_MODEL
+                && (keyCode == 257 || keyCode == 335)) {
+            ModelTablePanel panel = modelPanel();
+            if (panel.isSearchFocused() || panel.isCustomFocused()) {
+                next();
+                return true;
+            }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
@@ -2872,8 +3473,14 @@ public class GuideScreen extends Screen {
          */
         private static int borderColor = COLOR_ROW_SELECTED;
 
-        /** 空且聚焦时要补画的提示文字；{@code null} 表示不补。 */
+        /**
+         * 空且聚焦时要补画的提示文字；{@code null} 表示不补。
+         * <p>它<b>不在</b> {@link #renderWidget} 里画——见下方那段说明。
+         */
         private static String focusedHint;
+
+        /** 本帧是否已经画完；外部据此决定要不要补画提示。 */
+        private boolean renderedThisFrame = false;
 
         /** 由外部按校验结果设置边框颜色。 */
         static void setBorderColor(int color) {
@@ -2890,10 +3497,26 @@ public class GuideScreen extends Screen {
             super(font, x, y, width, height, message);
         }
 
+        /** 现在是否需要补画提示文字（聚焦、为空、且设了提示）。 */
+        boolean needsFocusedHint() {
+            return getValue().isEmpty() && isFocused() && focusedHint != null;
+        }
+
+        /**
+         * 在输入框<b>外部</b>补画那行提示文字。
+         * <p>由 {@code GuideScreen} 在 {@code super.render} 之后调用，不在本类里自画。
+         */
+        void drawFocusedHint(GuiGraphics graphics) {
+            if (!needsFocusedHint()) return;
+            graphics.drawString(Minecraft.getInstance().font,
+                    Component.literal(focusedHint).withStyle(ChatFormatting.ITALIC),
+                    getX() + 4, getY() + (getHeight() - 8) / 2, 0xFF777777, false);
+        }
+
         @Override
         public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             // 父类会按顺序画：外扩 1px 的边框（聚焦白/否则灰）→ 纯黑底 →
-            // 文字与光标 → 提示文字。全部交给它，本类只改两件事。
+            // 文字与光标 → 提示文字。全部交给它，本类只改边框颜色。
             super.renderWidget(graphics, mouseX, mouseY, partialTick);
 
             int x = getX();
@@ -2901,23 +3524,22 @@ public class GuideScreen extends Screen {
             int w = getWidth();
             int h = getHeight();
 
-            // 1. 把父类那一圈边框涂成当前状态色。
-            //    只涂边框（外扩 1px 的四条 1px 线），不碰内部，
-            //    否则会把刚画好的文字和光标一起擦掉。
+            // 把父类那一圈边框涂成当前状态色。
+            // 只涂边框（外扩 1px 的四条 1px 线），不碰内部，
+            // 否则会把刚画好的文字和光标一起擦掉。
             graphics.fill(x - 1, y - 1, x + w + 1, y, borderColor);            // 上
             graphics.fill(x - 1, y + h, x + w + 1, y + h + 1, borderColor);    // 下
             graphics.fill(x - 1, y, x, y + h, borderColor);                    // 左
             graphics.fill(x + w, y, x + w + 1, y + h, borderColor);            // 右
 
-            // 2. 提示文字：父类只在「未聚焦」时画（hint != null && value.isEmpty()
-            //    && !isFocused()）。这个输入框一被点中就聚焦，提示当场消失，
-            //    玩家反而看不到该填什么。这里在聚焦且为空时补画一份。
-            if (getValue().isEmpty() && isFocused() && focusedHint != null) {
-                // 与父类同样的排版：左内边距 4px、垂直居中
-                graphics.drawString(Minecraft.getInstance().font,
-                        Component.literal(focusedHint).withStyle(ChatFormatting.ITALIC),
-                        x + 4, y + (h - 8) / 2, 0xFF777777, false);
-            }
+            // 提示文字<b>不在这里画</b>。
+            // 原因是 1.20.1 的 GuiGraphics.drawString 末尾会调 flushIfUnmanaged()，
+            // 在非 managed 模式下会立刻 endBatch() 把之前排队的绘制<b>提前提交</b>。
+            // 输入框是在 super.render 的控件循环里画的，一旦在它里面调 drawString，
+            // 本页其余还在排队的文字（结论行、「还没有API Key？」）就会被挤到错的批次里，
+            // 表现为「提示行被输入框盖住」——那其实是批次被切碎导致的顺序错乱。
+            // 所以提示交给外部用 drawFocusedHint 在控件全部画完之后补。
+            renderedThisFrame = true;
         }
     }
 }
