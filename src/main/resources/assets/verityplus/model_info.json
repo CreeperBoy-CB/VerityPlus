@@ -1,0 +1,625 @@
+{
+  "schema": 2,
+  "note": "Verity Plus 的模型信息表。price 单位为人民币／百万 token；tool / thinking 省略表示未知，不要写成 false。数据来源见各条目的 source 字段。",
+  "order": {
+    "OPENAI": ["deepseek-flash", "deepseek-v4-pro"],
+    "智谱": ["glm-5.4", "glm-5.3-flash", "glm-5.3", "glm-5.3-flashx", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo"],
+    "GROQ": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-safeguard-20b"]
+  },
+  "models": {
+    "deepseek-flash": {
+      "common": "DeepSeek V4.1 Flash",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 2, "output": 8, "cache": 0.04},
+      "peak": {"price": {"input": 1, "output": 4, "cache": 0.02}, "note": "空闲时段（高峰的一半）"},
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+    },
+    "deepseek-v4-pro": {
+      "common": "DeepSeek V4 Pro",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 9, "output": 27, "cache": 0.3},
+      "peak": {"price": {"input": 4.5, "output": 13.5, "cache": 0.15}, "note": "空闲时段（高峰的一半）"},
+      "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+    },
+
+    "智谱/glm-5.3-flash": {
+      "common": "GLM 5.3 Flash",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.8, "output": 2.8, "cache": 0.23},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-5.3": {
+      "common": "GLM 5.3",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 8, "output": 28, "cache": 2},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-5.3-flashx": {
+      "common": "GLM 5.3 FlashX",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 2, "output": 7, "cache": 0.57},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-5.2": {
+      "common": "GLM 5.2",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 8, "output": 28, "cache": 2},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-5.1": {
+      "common": "GLM 5.1",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 6, "output": 24, "cache": 1.3},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-5": {
+      "common": "GLM 5",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 4, "output": 18, "cache": 1},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-5-turbo": {
+      "common": "GLM 5 Turbo",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 5, "output": 22, "cache": 1.2},
+      "source": "https://docs.bigmodel.cn/cn/guide/start/pricing"
+    },
+    "智谱/glm-4.7": {
+      "common": "GLM 4.7",
+      "tool": true,
+      "thinking": true
+    },
+    "智谱/glm-4.7-flash": {
+      "common": "GLM 4.7 Flash",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0, "output": 0, "cache": 0}
+    },
+    "智谱/glm-4.7-flashx": {
+      "common": "GLM 4.7 FlashX",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.5, "output": 3, "cache": 0.1}
+    },
+
+    "GROQ/openai/gpt-oss-120b": {
+      "common": "GPT OSS 120B",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.08, "output": 4.32, "cache": 0.54},
+      "source": "https://console.groq.com/docs/models",
+      "unconverted": {"currency": "USD", "input": 0.15, "output": 0.6, "cache": 0.075}
+    },
+    "GROQ/openai/gpt-oss-20b": {
+      "common": "GPT OSS 20B",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.54, "output": 2.16, "cache": 0.27},
+      "source": "https://console.groq.com/docs/models",
+      "unconverted": {"currency": "USD", "input": 0.075, "output": 0.3, "cache": 0.0375}
+    },
+    "GROQ/openai/gpt-oss-safeguard-20b": {
+      "common": "GPT OSS Safeguard 20B",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.54, "output": 2.16, "cache": 0.27},
+      "source": "https://console.groq.com/docs/models",
+      "unconverted": {"currency": "USD", "input": 0.075, "output": 0.3, "cache": 0.0375}
+    },
+    "GROQ/qwen/qwen3.8-27b": {
+      "common": "Qwen3.8 27B",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 5.76, "output": 28.8, "cache": 2.88},
+      "source": "https://console.groq.com/docs/models",
+      "unconverted": {"currency": "USD", "input": 0.8, "output": 4.0, "cache": 0.4}
+    },
+
+    "Mistral/mistral-large-4-0": {
+      "common": "Mistral Large 4",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 5.04, "output": 15.12, "cache": 0.504},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.7, "output": 2.1, "cache": 0.07}
+    },
+    "Mistral/mistral-small-4-0": {
+      "common": "Mistral Small 4",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.08, "output": 4.32},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.15, "output": 0.6}
+    },
+    "Mistral/ministral-14b-2512": {
+      "common": "Ministral 3 (14B)",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.44, "output": 1.44},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.2, "output": 0.2}
+    },
+    "Mistral/ministral-8b-2512": {
+      "common": "Ministral 3 (8B)",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.08, "output": 1.08},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.15, "output": 0.15}
+    },
+    "Mistral/ministral-3b-2512": {
+      "common": "Ministral 3 (3B)",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.72, "output": 0.72},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.1, "output": 0.1}
+    },
+    "Mistral/codestral-2508": {
+      "common": "Codestral",
+      "tool": true,
+      "thinking": false,
+      "price": {"input": 2.16, "output": 6.48},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.3, "output": 0.9}
+    },
+    "Mistral/mistral-medium-latest": {
+      "common": "Mistral Medium 3.5",
+      "tool": true,
+      "thinking": true
+    },
+    "Mistral/mistral-small-2603": {
+      "common": "Mistral Small 4",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.08, "output": 4.32},
+      "source": "https://docs.mistral.ai/inference/pricing",
+      "unconverted": {"currency": "USD", "input": 0.15, "output": 0.6}
+    },
+
+    "Gemini/gemini-4-carbon": {
+      "common": "Gemini 4 Carbon",
+      "thinking": true,
+      "price": {"input": 28.8, "output": 144, "cache": 1.44},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 4.0, "output": 20.0, "cache": 0.2}
+    },
+    "Gemini/gemini-4-argon": {
+      "common": "Gemini 4 Argon",
+      "thinking": true,
+      "price": {"input": 28.8, "output": 144, "cache": 1.44},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 4.0, "output": 20.0, "cache": 0.2}
+    },
+    "Gemini/gemini-4-neon": {
+      "common": "Gemini 4 Neon",
+      "thinking": true,
+      "price": {"input": 21.6, "output": 108, "cache": 1.08},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 3.0, "output": 15.0, "cache": 0.15}
+    },
+    "Gemini/gemini-4-hydrogen": {
+      "common": "Gemini 4 Hydrogen",
+      "thinking": true,
+      "price": {"input": 10.8, "output": 54, "cache": 0.54},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.5, "output": 7.5, "cache": 0.075}
+    },
+    "Gemini/gemini-3.8-flash": {
+      "common": "Gemini 3.8 Flash",
+      "thinking": true,
+      "price": {"input": 10.8, "output": 54, "cache": 0.54},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.5, "output": 7.5, "cache": 0.075}
+    },
+    "Gemini/gemini-3.7-flash": {
+      "common": "Gemini 3.7 Flash",
+      "thinking": true
+    },
+    "Gemini/gemini-3.6-flash": {
+      "common": "Gemini 3.6 Flash",
+      "thinking": true,
+      "price": {"input": 10.8, "output": 54, "cache": 0.54},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.5, "output": 7.5, "cache": 0.075}
+    },
+    "Gemini/gemini-3.5-flash": {
+      "common": "Gemini 3.5 Flash",
+      "thinking": true
+    },
+    "Gemini/gemini-3.5-flash-lite": {
+      "common": "Gemini 3.5 Flash-Lite",
+      "thinking": true,
+      "price": {"input": 2.16, "output": 18, "cache": 0.216},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.3, "output": 2.5, "cache": 0.03}
+    },
+    "Gemini/gemini-3.1-flash-lite": {
+      "common": "Gemini 3.1 Flash-Lite",
+      "thinking": true,
+      "price": {"input": 1.8, "output": 10.8, "cache": 0.18},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.25, "output": 1.5, "cache": 0.025}
+    },
+    "Gemini/gemini-3.1-pro-preview": {
+      "common": "Gemini 3.1 Pro Preview",
+      "thinking": true,
+      "price": {"input": 14.4, "output": 86.4, "cache": 1.44},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 12.0, "cache": 0.2}
+    },
+    "Gemini/gemini-3-flash-preview": {
+      "common": "Gemini 3 Flash Preview",
+      "thinking": true,
+      "price": {"input": 3.6, "output": 21.6, "cache": 0.36},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.5, "output": 3.0, "cache": 0.05}
+    },
+    "Gemini/gemini-2.5-flash": {
+      "common": "Gemini 2.5 Flash",
+      "thinking": true,
+      "price": {"input": 2.16, "output": 18, "cache": 0.216},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.3, "output": 2.5, "cache": 0.03}
+    },
+    "Gemini/gemini-2.5-pro": {
+      "common": "Gemini 2.5 Pro",
+      "thinking": true,
+      "price": {"input": 9.0, "output": 72, "cache": 0.9},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.25, "output": 10.0, "cache": 0.125}
+    },
+    "Gemini/gemini-2.5-flash-lite": {
+      "common": "Gemini 2.5 Flash-Lite",
+      "thinking": true,
+      "price": {"input": 0.72, "output": 2.88, "cache": 0.072},
+      "source": "https://aistudio.google.com/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.1, "output": 0.4, "cache": 0.01}
+    },
+    "Gemini/gemini-flash-latest": {
+      "common": "Gemini Flash (最新)",
+      "thinking": true
+    },
+    "Gemini/gemini-flash-lite-latest": {
+      "common": "Gemini Flash-Lite (最新)",
+      "thinking": true
+    },
+    "Gemini/gemini-pro-latest": {
+      "common": "Gemini Pro (最新)",
+      "thinking": true
+    },
+    "Gemini/gemma-4-26b-a4b-it": {
+      "common": "Gemma 4 26B A4B",
+      "thinking": true
+    },
+    "Gemini/gemma-4-31b-it": {
+      "common": "Gemma 4 31B",
+      "thinking": true
+    },
+
+    "OpenAI/gpt-6.2-astra": {
+      "common": "GPT-6.2 Astra",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 57.6, "output": 288, "cache": 2.88},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 8.0, "output": 40.0, "cache": 0.4}
+    },
+    "OpenAI/gpt-6.2-sol": {
+      "common": "GPT-6.2 Sol",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 14.4, "output": 72, "cache": 0.72},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 10.0, "cache": 0.1}
+    },
+    "OpenAI/gpt-6-astra": {
+      "common": "GPT-6 Astra",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 72, "output": 360, "cache": 7.2},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 10.0, "output": 50.0, "cache": 1.0}
+    },
+    "OpenAI/gpt-6.1-sol": {
+      "common": "GPT-6.1 Sol",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 14.4, "output": 72, "cache": 0.72},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 10.0, "cache": 0.1}
+    },
+    "OpenAI/gpt-6.1-terra": {
+      "common": "GPT-6.1 Terra",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 7.2, "output": 36, "cache": 0.36},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.0, "output": 5.0, "cache": 0.05}
+    },
+    "OpenAI/gpt-6-luna": {
+      "common": "GPT-6 Luna",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.72, "output": 3.6, "cache": 0.072},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.1, "output": 0.5, "cache": 0.01}
+    },
+    "OpenAI/gpt-6-sol": {
+      "common": "GPT-6 Sol",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 14.4, "output": 72, "cache": 1.44},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 10.0, "cache": 0.2}
+    },
+    "OpenAI/gpt-5.6-sol": {
+      "common": "GPT-5.6 Sol",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 28.8, "output": 144, "cache": 2.88},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 4.0, "output": 20.0, "cache": 0.4}
+    },
+    "OpenAI/gpt-5.6-terra": {
+      "common": "GPT-5.6 Terra",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 14.4, "output": 86.4, "cache": 1.44},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 12.0, "cache": 0.2}
+    },
+    "OpenAI/gpt-5.6-luna": {
+      "common": "GPT-5.6 Luna",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.44, "output": 8.64, "cache": 0.144},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.2, "output": 1.2, "cache": 0.02}
+    },
+    "OpenAI/gpt-5.5": {
+      "common": "GPT-5.5",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 36, "output": 216, "cache": 3.6},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 5.0, "output": 30.0, "cache": 0.5}
+    },
+    "OpenAI/gpt-5.5-pro": {
+      "common": "GPT-5.5 Pro",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 216, "output": 1296},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 30.0, "output": 180.0}
+    },
+    "OpenAI/gpt-5.4": {
+      "common": "GPT-5.4",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 18, "output": 108, "cache": 1.8},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.5, "output": 15.0, "cache": 0.25}
+    },
+    "OpenAI/gpt-5.4-pro": {
+      "common": "GPT-5.4 Pro",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 216, "output": 1296},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 30.0, "output": 180.0}
+    },
+    "OpenAI/gpt-5.4-mini": {
+      "common": "GPT-5.4 mini",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 5.4, "output": 32.4, "cache": 0.54},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.75, "output": 4.5, "cache": 0.075}
+    },
+    "OpenAI/gpt-5.4-nano": {
+      "common": "GPT-5.4 nano",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.44, "output": 9, "cache": 0.144},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.2, "output": 1.25, "cache": 0.02}
+    },
+    "OpenAI/gpt-5.2": {
+      "common": "GPT-5.2",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 12.6, "output": 100.8, "cache": 1.26},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.75, "output": 14.0, "cache": 0.175}
+    },
+    "OpenAI/gpt-5.2-pro": {
+      "common": "GPT-5.2 Pro",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 151.2, "output": 1209.6},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 21.0, "output": 168.0}
+    },
+    "OpenAI/gpt-5.1": {
+      "common": "GPT-5.1",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 9, "output": 72, "cache": 0.9},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.25, "output": 10.0, "cache": 0.125}
+    },
+    "OpenAI/gpt-5": {
+      "common": "GPT-5",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 9, "output": 72, "cache": 0.9},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 1.25, "output": 10.0, "cache": 0.125}
+    },
+    "OpenAI/gpt-5-mini": {
+      "common": "GPT-5 mini",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 1.8, "output": 14.4, "cache": 0.18},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.25, "output": 2.0, "cache": 0.025}
+    },
+    "OpenAI/gpt-5-nano": {
+      "common": "GPT-5 nano",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 0.36, "output": 2.88, "cache": 0.036},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.05, "output": 0.4, "cache": 0.005}
+    },
+    "OpenAI/gpt-5-pro": {
+      "common": "GPT-5 Pro",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 108, "output": 864},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 15.0, "output": 120.0}
+    },
+    "OpenAI/gpt-4.1": {
+      "common": "GPT-4.1",
+      "tool": true,
+      "price": {"input": 14.4, "output": 57.6, "cache": 3.6},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 8.0, "cache": 0.5}
+    },
+    "OpenAI/gpt-4.1-mini": {
+      "common": "GPT-4.1 mini",
+      "tool": true,
+      "price": {"input": 2.88, "output": 11.52, "cache": 0.72},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.4, "output": 1.6, "cache": 0.1}
+    },
+    "OpenAI/gpt-4o": {
+      "common": "GPT-4o",
+      "tool": true,
+      "price": {"input": 18, "output": 72, "cache": 9},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.5, "output": 10.0, "cache": 1.25}
+    },
+    "OpenAI/gpt-4o-mini": {
+      "common": "GPT-4o mini",
+      "tool": true,
+      "price": {"input": 1.08, "output": 4.32, "cache": 0.54},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 0.15, "output": 0.6, "cache": 0.075}
+    },
+    "OpenAI/o3": {
+      "common": "o3",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 14.4, "output": 57.6, "cache": 3.6},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 2.0, "output": 8.0, "cache": 0.5}
+    },
+    "OpenAI/o3-pro": {
+      "common": "o3-pro",
+      "tool": true,
+      "thinking": true,
+      "price": {"input": 144, "output": 576},
+      "source": "https://developers.openai.com/zh-Hans/api/docs/pricing",
+      "unconverted": {"currency": "USD", "input": 20.0, "output": 80.0}
+    }
+  },
+  "aliases": {
+    "deepseek-v4-flash": "deepseek-flash",
+    "deepseek-v4-flash-vision-exp": "deepseek-flash",
+    "glm-4.7-flash-x": "智谱/glm-4.7-flashx",
+    "智谱/glm-4.7-flash-x": "智谱/glm-4.7-flashx"
+  },
+  "rules": [
+    {"prefix": "glm-", "tool": true, "thinking": true},
+    {"prefix": "text-embedding-", "tool": false, "thinking": false},
+    {"prefix": "embedding-", "tool": false, "thinking": false},
+    {"prefix": "text-moderation-", "tool": false, "thinking": false},
+    {"prefix": "whisper-", "tool": false, "thinking": false},
+    {"prefix": "tts-", "tool": false, "thinking": false},
+    {"prefix": "dall-e", "tool": false, "thinking": false},
+    {"prefix": "gpt-image", "tool": false, "thinking": false},
+    {"prefix": "chatgpt-image", "tool": false, "thinking": false},
+    {"prefix": "imagen-", "tool": false, "thinking": false},
+    {"prefix": "veo-", "tool": false, "thinking": false},
+    {"prefix": "aqa", "tool": false, "thinking": false},
+    {"prefix": "omni-moderation", "tool": false, "thinking": false},
+    {"prefix": "gpt-audio", "tool": false, "thinking": false},
+    {"prefix": "gpt-realtime", "tool": false, "thinking": false},
+    {"prefix": "gpt-transcribe", "tool": false, "thinking": false},
+    {"prefix": "gpt-live-transcribe", "tool": false, "thinking": false},
+    {"prefix": "gpt-4o-transcribe", "tool": false, "thinking": false},
+    {"prefix": "gpt-4o-mini-transcribe", "tool": false, "thinking": false},
+    {"prefix": "gpt-4o-mini-tts", "tool": false, "thinking": false}
+  ],
+  "nonTextPrefixes": [
+    "text-embedding-",
+    "embedding-",
+    "text-moderation-",
+    "omni-moderation",
+    "whisper-",
+    "tts-",
+    "dall-e",
+    "gpt-image",
+    "chatgpt-image",
+    "imagen-",
+    "veo-",
+    "aqua",
+    "aqa",
+    "gpt-audio",
+    "gpt-realtime",
+    "gpt-transcribe",
+    "gpt-live-transcribe",
+    "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe",
+    "gpt-4o-mini-tts",
+    "voxtral-mini-tts",
+    "-transcribe-",
+    "-realtime-",
+    "glm-asr",
+    "glm-tts",
+    "glm-image",
+    "glm-ocr",
+    "cogvideox",
+    "embedding-",
+    "-embed-",
+    "lyria-",
+    "nano-banana",
+    "deep-research",
+    "antigravity-",
+    "gemini-robotics",
+    "gemini-decision",
+    "gemini-omni",
+    "computer-use",
+    "genie-"
+  ],
+  "nonTextContains": [
+    "-tts",
+    "-preview-tts",
+    "-image-",
+    "-embedding",
+    "-transcribe",
+    "-realtime",
+    "veo-",
+    "-ocr",
+    "-image",
+    "-omni-",
+    "-robotics",
+    "computer-use",
+    "deep-research",
+    "nano-banana",
+    "gemini-3.1-flash-lite-preview",
+    "voxtral"
+  ]
+}
