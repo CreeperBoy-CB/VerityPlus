@@ -242,7 +242,9 @@ public final class Providers {
         List<PickerOption> list = new ArrayList<>();
         list.add(new PickerOption(PICKER_PLACEHOLDER, "选择一个你中意的 AI 提供商",
                 null, null, null, "", "", ""));
-        list.add(new PickerOption("GROQ", "极速输出，有免费额度，国内无法正常访问",
+        // GROQ：Cloudflare 按 loc=CN 在边缘直接 403，连 /chat/completions 都发不出去，
+        // 所以措辞说的是「API 无法访问」，而官网 groq.com 静态页其实能打开
+        list.add(new PickerOption("GROQ", "极速输出，有免费额度，国内API无法访问",
                 GROQ, null, "已切换为 GROQ，但模型尚未配置",
                 "https://console.groq.com/keys",
                 "https://console.groq.com/settings/billing",
@@ -270,7 +272,17 @@ public final class Providers {
                 "https://aistudio.google.com/app/billing",
                 "https://aistudio.google.com/"));
         // OpenRouter：Verity 内部写死 https://openrouter.ai/api/v1/，留 null
-        list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内可访问但延迟较高",
+        //
+        // 文案从「国内可访问但延迟较高」改成「国内无法注册账号」：
+        // 早先只测了接口延迟（能通，2~7 秒），据此归进了「可访问」。
+        // 但注册走不通就没意义——实测两台设备、两个不同出口（校园网 AS4134 电信、
+        // 私有网络 AS9808 移动）都在提交时秒报
+        // "Unable to verify ... For your security, this request could not be completed"，
+        // 且始终看不到验证码。追下去是注册页的验证码依赖 www.google.com，
+        // 而该域名在境内被阻断（recaptcha.net 镜像能通，Google 主站不能）。
+        // 换成 GitHub 登录也一样：OAuth 本身走得通，回来后仍要过同一道校验。
+        // 所以对外措辞只说「无法注册账号」——API 确实能连，不该说成完全不可访问。
+        list.add(new PickerOption("OpenRouter", "一个模型集合中转站，聚合大量模型（含免费模型），国内无法注册账号",
                 OPENAI, null, null,
                 "https://openrouter.ai/settings/keys",
                 "https://openrouter.ai/settings/credits",
@@ -289,14 +301,25 @@ public final class Providers {
     /**
      * 按界面语言排好的列表项。
      *
-     * <p><b>简体中文</b>：按「国内可直接用」的梯度分组排序——
+     * <p><b>简体中文</b>：按「国内能不能用」分成三档——
      * <ol>
-     *   <li>国内提供商：DeepSeek、智谱；</li>
-     *   <li>国内可能无法稳定访问：GROQ、OpenRouter；</li>
-     *   <li>国内无法正常访问：ChatGPT、Gemini、Mistral；</li>
+     *   <li>国内可直接用：DeepSeek、智谱；</li>
+     *   <li>国内用不了：GROQ、ChatGPT、Gemini、OpenRouter、Mistral；</li>
      *   <li>自定义。</li>
      * </ol>
      * 组内保持 {@link #pickerTemplate()} 里的相对顺序。
+     *
+     * <p><b>判断标准是「能不能走完 注册 → 拿 Key → 调用」整条链路</b>，
+     * 而不是某一次接口探活通不通。第二档里各家的断点其实并不一样：
+     * <ul>
+     *   <li>GROQ：Cloudflare 按 {@code loc=CN} 在边缘 403，API 直接调不通；</li>
+     *   <li>OpenRouter：页面与 API 都能连，但注册的验证码依赖 {@code www.google.com}，
+     *       境内被阻断，于是拿不到账号（见 {@link #pickerTemplate()} 里那一段注释）；</li>
+     *   <li>ChatGPT / Gemini / Mistral：控制台与 API 本身也访问不了。</li>
+     * </ul>
+     * 对玩家来说结果一致：都用不了，所以放在同一档。
+     * 早先单独分出来的「很慢但能用」那一档已经取消——慢不等于不能用，
+     * 而当时那一档里只剩 OpenRouter 一家，分出来只会误导。
      *
      * <p><b>其它语言</b>：保持 {@link #pickerTemplate()} 的原始顺序
      * （GROQ 在第 2 位），不做任何调整。
@@ -309,20 +332,17 @@ public final class Providers {
         if (!simplifiedChinese) return new ArrayList<>(all);
 
         PickerOption placeholder = all.get(0);
-        // 组 1：国内可直接用 —— API 延迟与国内服务同级（实测百毫秒级）
+        // 组 1：国内可直接用 —— 实测百毫秒级，注册与调用都走得通
         List<PickerOption> local = List.of(all.get(2), all.get(3));          // DeepSeek, 智谱
-        // 组 2：能连但很慢 —— 实测可访问，延迟却是国内服务的二十倍上下
-        List<PickerOption> slow = List.of(all.get(6));                       // OpenRouter
-        // 组 3：国内无法正常访问 —— 实测 API 或控制台被拒（403 / 超时）
-        List<PickerOption> blocked = List.of(all.get(1), all.get(4), all.get(5), all.get(7));
-        //                                                                     GROQ, ChatGPT, Gemini, Mistral
-        // 组 4：自定义
+        // 组 2：国内用不了 —— 断点各不相同，但结果都是拿不到可用的 Key / 调不通
+        List<PickerOption> blocked = List.of(all.get(1), all.get(4), all.get(5), all.get(6), all.get(7));
+        //                                                                     GROQ, ChatGPT, Gemini, OpenRouter, Mistral
+        // 组 3：自定义
         List<PickerOption> custom = List.of(all.get(8));
 
         List<PickerOption> options = new ArrayList<>();
         options.add(placeholder);
         options.addAll(local);
-        options.addAll(slow);
         options.addAll(blocked);
         options.addAll(custom);
         return options;
